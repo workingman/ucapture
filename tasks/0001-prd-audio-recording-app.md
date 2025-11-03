@@ -13,8 +13,8 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 ## 2. Goals
 
-1. Enable continuous, reliable audio recording on Android devices with minimal user intervention
-2. Automatically manage local storage by uploading recordings and verifying successful transfer
+1. Enable continuous, reliable audio recording on Android devices with minimal user intervention, operating reliably in background with screen off or phone locked
+2. Automatically manage local storage by uploading recordings and verifying successful transfer, while retaining recent audio for local replay
 3. Provide configurable audio quality settings to balance file size and recording fidelity
 4. Chunk long recordings into manageable file sizes for efficient upload and processing
 5. Capture rich contextual metadata (GPS location, calendar meetings) to enhance AI processing and transcription accuracy
@@ -31,12 +31,11 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **US-4:** As a user, I want to adjust audio quality settings so that I can balance storage/bandwidth needs with recording fidelity.
 
-**US-5:** As a user, I want the app to automatically delete local files after successful upload so that my device storage doesn't fill up.
+**US-5:** As a user, I want the app to automatically delete local files after successful upload (while retaining recent recordings for replay) so that my device storage doesn't fill up.
 
-**US-6:** As a user, I want to see a list of my recordings with basic information (date, duration, size, upload status) so that I can verify the app is working correctly.
-(GR: actually, I don't think we need to show the list of recordings, that will be part of the web-based system)
+**US-6:** As a user, I want to replay recent recordings on a vertically scrolling timeline (showing timestamps, and eventually transcribed text snippets) so that I can quickly find and reference parts of conversations.
 
-**US-7:** As a user, I want to preview/playback recordings locally before they're uploaded so that I can verify recording quality. (GR: and to replay parts of the conversation for reference).
+**US-7:** As a user, I want the app to pause and resume recording so that I can temporarily stop capturing audio without ending the session.
 
 **US-8:** As a user, I want clear error notifications when recording or upload fails so that I can take corrective action.
 
@@ -52,24 +51,30 @@ The ubiq-capture Android app is the first component of a three-part audio captur
    - Microphone (for audio recording)
    - Location (for contextual metadata and meeting location tracking)
    - Calendar read access (for meeting metadata association)
+   - Foreground service permission (for background recording)
+   - Notification permission (for persistent recording notification)
+   - Battery optimization exemption (to prevent system from stopping recording)
 
-**FR-2:** The app must provide a clear start/stop recording control (button or toggle).
+**FR-2:** The app must provide clear recording controls: start, pause, resume, and stop.
 
-**FR-3:** The app must support continuous recording that can span an entire day (24+ hours).
+**FR-3:** The app must support continuous recording that can span an entire day (24+ hours), continuing to operate when the screen is off or the phone is locked.
 
-**FR-4:** The app must automatically chunk recordings into files of reasonable size (exact size to be determined during testing based on empirical usage data, suggest starting with 30-60 minute chunks). (GR: we may try some dynamic chunking too so that meetings are contained in a single recording and long quiet periods can be trimmed, I see you noted that in NG-8; ensure the design can handle this after mvp)
+**FR-4:** The app must automatically chunk recordings into files of reasonable size (starting with 30-60 minute chunks, to be determined through empirical testing). Architecture must support future dynamic chunking strategies (e.g., meeting-aware chunking, silence trimming).
 
 **FR-5:** The app must record audio in medium quality (MP3, 128kbps) by default.
 
 **FR-6:** The app must save recordings to local device storage temporarily until upload is complete.
 
-**FR-7:** The app must use a consistent file naming convention that includes timestamp and metadata (e.g., `ubiq-YYYYMMDD-HHMMSS-[chunk-number].mp3`). (GR: the metadata should also include precise clock measurements for the start and end of the file and for each GPS sample)
+**FR-7:** The app must use a consistent file naming convention that includes timestamp with timezone (e.g., `ubiq-YYYYMMDD-HHMMSS-PDT-[chunk-number].mp3`). Metadata must include precise clock measurements (Unix timestamp with milliseconds) for recording start, recording end, and each GPS sample.
 
 ### 4.2 Settings & Configuration
 
 **FR-8:** The app must provide a settings screen where users can configure:
    - Audio quality (Low: 64kbps, Medium: 128kbps, High: 256kbps)
    - GPS sampling interval (code-configurable, default: 1 minute; future: user-configurable in web frontend)
+   - Local audio retention period (how long to keep recordings on-device after upload for replay)
+   - Maximum local storage limit for recordings (stop recording when limit reached)
+   - Low storage warning threshold (default: 500MB)
    - Google Drive destination folder
    - Future: GCS bucket configuration (placeholder for post-MVP)
 
@@ -85,11 +90,11 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **FR-13:** The app must verify successful upload by comparing MD5 hash of local file with uploaded file.
 
-**FR-14:** The app must delete local files only after successful upload verification. (GR: let's keep the last X minutes on-device, configurable by the user.)
+**FR-14:** The app must delete local files after successful upload verification, but retain recordings for a user-configurable period (e.g., last 30 minutes, 1 hour, 24 hours) to enable local replay functionality.
 
-**FR-15:** The app must queue uploads when network is unavailable and retry when connectivity is restored.
+**FR-15:** The app must queue uploads when network is unavailable and retry when connectivity is restored. Wait for chunks to complete before uploading (don't upload partial chunks).
 
-**FR-16:** The app must upload recordings in the background (using WorkManager or similar) even if the app is not in foreground. (GR: good point, let's make sure tha whole app can function as a background app - update the PRD accordingly)
+**FR-16:** The app must function as a background app, uploading recordings in the background (using WorkManager or similar) even when not in foreground, with screen off, or phone locked.
 
 **FR-17:** The app must handle upload failures gracefully with retry logic (exponential backoff).
 
@@ -99,20 +104,22 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **FR-19:** The app must show current recording duration and estimated file size.
 
-**FR-20:** The app must display a list of recordings showing:
-   - Date/time of recording
-   - Duration
-   - File size
-   - Upload status (pending, uploading, uploaded, failed)
-   (GR: I don't think we need to show the recording files, but we should show a timeline of available audio that the user can replay - retained as per FR-14)
+**FR-20:** The app must display a vertically scrolling timeline view of retained local audio showing:
+   - Timestamp for each recording segment
+   - Recording duration indicators
+   - Visual indication of current playback position
+   - Future: Transcribed text snippets (when on-device transcription is implemented)
 
-**FR-21:** The app must provide basic audio playback for local recordings.
+**FR-21:** The app must provide audio playback with the ability to:
+   - Tap on timeline entries to jump to specific times
+   - Scrub through audio within the timeline
+   - Play/pause controls
 
 **FR-22:** The app must display clear error messages and notifications for all error scenarios.
 
 ### 4.5 Storage & File Management
 
-**FR-23:** The app must monitor available local storage and warn users when space is low (< 500MB, (GR: configurable in user settings)).
+**FR-23:** The app must monitor available local storage and warn users when space is low (user-configurable threshold, default: 500MB).
 
 **FR-24:** The app must prevent recording if insufficient storage is available.
 
@@ -134,7 +141,7 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **FR-30b:** The app must handle "calendar permissions denied" by continuing to record audio without calendar metadata and notifying the user that meeting context will not be available.
 
-(GR: add in the permissions to run in the background)
+**FR-30c:** The app must handle "battery optimization" and "background restrictions" by prompting the user to grant exemptions, explaining that these are required for reliable continuous recording.
 
 ### 4.7 Architecture for Future Integration
 
@@ -226,7 +233,7 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **NG-9:** Integration with other cloud storage providers (Dropbox, OneDrive, etc.)
 
-**NG-10:** Background recording with screen off (may require additional battery optimization work) (GR: ok, we can leave this out of the MVP but I definitely want recording to continue when the phone is locked/screen-off)
+**NG-10:** Full on-device transcription using Whisper or similar models - Future enhancement (Phase 2)
 
 ## 6. Design Considerations
 
@@ -248,28 +255,37 @@ The ubiq-capture Android app is the first component of a three-part audio captur
    - Green: Uploaded successfully
    - Red: Failed (with retry option)
 
+**DC-7:** Timeline view design:
+   - Vertically scrolling list (most recent at top)
+   - Each entry shows timestamp (e.g., "Today 2:30 PM PST")
+   - Duration indicator for each segment
+   - MVP: Timestamps only
+   - Future: Include short transcribed text preview under each timestamp
+   - Tappable entries to play audio from that point
+   - Visual playback progress indicator
+
 ### 6.2 User Flow
 
 1. **First Launch:**
-   - Grant microphone permission
+   - Grant required permissions (microphone, location, calendar, notifications, foreground service, battery optimization exemption)
    - Authenticate with Google Drive
    - Configure Google Drive destination folder
-   - Optional: Adjust audio quality settings
-   
-   (GR: may need microphone, location, and background permissions here too)
+   - Optional: Adjust audio quality, retention period, and other settings
 
 2. **Recording Session:**
    - Tap record button
-   - App records continuously, auto-chunking
+   - App records continuously in background, auto-chunking
+   - Use pause/resume as needed
    - Chunks upload automatically in background
-   - Local files deleted after verification (GR: with some retention for replay of the last X minutes, configurable)
+   - Local files retained per user-configured retention period, then deleted after upload verification
    - User can stop recording anytime
 
-3. **Viewing Recordings:**
-   - Navigate to recordings list (GR: make this just the "replay the last X minutes stuff with a timeline rather than file list.)
-   - View recording details
-   - Play recording locally (if not yet uploaded/deleted)
-   - Check upload status
+3. **Replay Recent Audio:**
+   - Navigate to vertically scrolling timeline view
+   - Browse recordings by timestamp (most recent at top)
+   - Tap on timeline entry to play audio from that point
+   - Scrub through audio within playback controls
+   - Future: Search and browse by transcribed text snippets
 
 ## 7. Technical Considerations
 
@@ -301,7 +317,7 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **TC-11:** Record to MP3 format using appropriate encoder
 
-**TC-12:** Consider using foreground service with notification to keep recording active
+**TC-12:** Use foreground service with persistent notification to keep recording active with screen off and phone locked. Handle wake locks and battery optimization exemptions properly.
 
 ### 7.4 Cloud Storage
 
@@ -340,7 +356,7 @@ class CalendarMetadataCollector : MetadataCollector { ... }
 
 **TC-15e:** Store location and calendar metadata in Room database alongside recording metadata
 
-**TC-15f:** Include metadata in JSON format when uploading to cloud storage (separate .json file or embedded in audio file metadata)
+**TC-15f:** Prefer embedding metadata directly in audio file (using ID3 tags or similar). Fall back to separate JSON sidecar file if embedding is not feasible for MP3 format.
 
 ### 7.5 Performance & Battery
 
@@ -424,68 +440,71 @@ class CalendarMetadataCollector : MetadataCollector { ... }
 
 **SM-9:** Battery impact with location tracking: < 20% battery drain over 8-hour recording session (5% increase from baseline)
 
-## 9. Open Questions
+## 9. Decisions & Future Enhancements
 
-**OQ-1:** What is the optimal chunk size for recordings? (Requires empirical testing with real usage)
-   - Consider: Upload reliability, file size, processing efficiency
-   - Suggested starting point: 30-60 minutes
+### Resolved Decisions
 
-   (GR: starting point is good.  as I said above, we may want some dynamic aspect of the chunk size depending on meetings - don't spread a meeting across 2 chunks unless it is longer than X minutes.  Also, there will be long quiet periods so maybe we can do something with that.  If there is no transcribe-able content then I don't want it uploaded... but that doesn't have to be mvp)
+**D-1: Chunk Size**
+- Start with 30-60 minute chunks for MVP
+- Architecture must support future dynamic chunking (meeting-aware, silence detection)
+- Post-MVP: Don't split meetings across chunks unless meeting exceeds threshold
+- Post-MVP: Detect and skip non-transcribable content (long silence periods)
 
-**OQ-2:** Should we implement pause/resume functionality, or is stop/start sufficient?
-(GR: let's add pause.  good idea)
+**D-2: Pause/Resume**
+- **Decision:** Add pause/resume functionality to MVP
 
-**OQ-3:** How should we handle recordings in progress when network becomes available - upload what we have so far, or wait for chunk to complete?
-(GR: wait for chunks to complete naturally, upload any completed chunks)
+**D-3: Upload Timing**
+- **Decision:** Wait for chunks to complete before uploading. Upload completed chunks when network is available.
 
-**OQ-4:** Should there be a maximum storage limit for local recordings (e.g., stop recording if more than 5GB locally stored)?
-(GR: make this configurable, ...so, yes :)
+**D-4: Storage Limits**
+- **Decision:** Make maximum local storage limit user-configurable (with sensible defaults)
 
-**OQ-5:** What level of compression quality provides acceptable balance between file size and transcription accuracy for the backend?
-(GR: let's make this code-configurable and see how things work in practice)
+**D-5: Audio Quality**
+- **Decision:** Make compression quality code-configurable, determine optimal settings through empirical testing
 
-**OQ-6:** Should we implement any local backup before deletion (e.g., keep for 24 hours even after upload)?
-(GR: nah, after the MD5 comparison, I'm happy to get rid of the file... however, we should provide a bit of retention to give the user replay capabilities, user-configurable time for retention)
+**D-6: Local Retention**
+- **Decision:** Provide user-configurable retention period for local replay (not full backup). Delete after MD5 verification + retention period.
 
-**OQ-7:** For smart recording detection (future): What algorithm/threshold should we use to detect "silence" vs "worth recording"?
-(GR: let's answer in the future, but "worth recording" is the better choice.)
+**D-7: DST Handling**
+- **Decision:** Include timezone abbreviation (PDT/PST) in filename and full timezone info in metadata timestamps
 
-**OQ-8:** Should we add any user-facing metadata fields (tags, notes, location) or keep strictly automated?
-(GR: a "quick-note" that gets added at the timestamp is a cool idea but not mvp - keep track of this though)
+**D-8: Background Recording**
+- **Decision:** Critical requirement - must work with screen off and phone locked
 
-**OQ-9:** How should we handle DST (daylight saving time) transitions in file naming and metadata?
-(GR: include "PDT" or "PST" in the timestamp to differentiate duplicate recording spans)
+**D-9: GPS Sampling Interval**
+- **Decision:** Start with 1-minute sampling for testing/development
+- Post-MVP: Implement adaptive sampling based on movement detection
+- Goal: Optimize for battery over granularity in production
 
-**OQ-10:** Should background recording continue when screen is off? What about battery optimization implications?
-(GR: It's is very important that recording continues to operate while the screen is off or the phone is locked)
+**D-10: Calendar Events Spanning Chunks**
+- **Decision:** Include calendar event metadata in all chunks that overlap with the event
 
-**OQ-11:** What is the optimal GPS sampling interval balancing context accuracy vs battery life and data volume?
-   - 1 minute default may be too frequent for stationary users
-   - Consider adaptive sampling based on movement detection
-(GR: adaptive is a great idea.  I was thinking about making it a bit longer - say, 5 min - but for testing purposes it's nice to have finer granulaity.  in general use, we want to optimize for battery use over granularity of location data)
+**D-11: Location Precision**
+- **Decision:** Use precise location data. Privacy is not a concern for this individual-use app.
 
-**OQ-12:** Should we implement geofencing to detect when user enters/exits meeting locations listed in calendar?
-(GR: maybe later, not mvp, keep track of this but it's low priority)
+**D-12: Metadata Format**
+- **Decision:** Prefer embedded metadata in audio files (ID3 tags). Fall back to JSON sidecar if needed.
 
-**OQ-13:** How should we handle calendar events that span multiple recording chunks?
-   - Include in metadata for all chunks?
-   - Only in chunks where event starts?
-(GR: all chunks.  )
+**D-13: Metadata Usage in AI Processing**
+- Location: Help user remember where conversations occurred, support personal note use cases
+- Calendar: Extract to-do lists, promises, action items, meeting sentiment analysis
 
-**OQ-14:** Should we filter out certain calendar event types (e.g., personal, private, declined meetings)?
-(GR: in the future, not mvp, keep track of this)
+### Future Enhancements (Post-MVP)
 
-**OQ-15:** How precise should location data be? Current accuracy setting may reveal user location too precisely - privacy concern?
-(GR: precise is fine.  I'm not too concerned about privacy, this app is for individual use - the data will not be avaialble to anyone else).
+**FE-1:** Smart recording detection - "worth recording" algorithm vs simple silence detection (see NG-8)
 
-**OQ-16:** Should metadata be uploaded as a separate JSON file or embedded in the audio file (ID3 tags, etc.)?
-(GR: I'm flexible here, I think i'd prefer it to be embedded?)
+**FE-2:** Quick voice notes feature - timestamp-based note annotation during recording
 
-**OQ-17:** Should users be able to manually edit/redact location or calendar metadata before upload?
-(GR: nah, maybe later)
+**FE-3:** Geofencing for meeting location detection (low priority)
 
-**OQ-18:** For future backend: How will location/calendar metadata be used in AI processing? Understanding this may influence what we collect now.
-(GR: to-do lists, promises made during meetings, action items, sentiment analysis of the attendees; for location, it's to help the user remember where particular conversations or personal notes occurred - personal notes may be a significant use case, BTW)
+**FE-4:** Calendar event type filtering (personal, private, declined meetings)
+
+**FE-5:** Manual metadata editing/redaction before upload
+
+**FE-6:** On-device transcription preview using Whisper (Phase 2, see NG-10)
+   - Display transcribed text snippets in timeline view
+   - Enable text search within retained recordings
+   - Provide quick preview before full cloud transcription
 
 ---
 

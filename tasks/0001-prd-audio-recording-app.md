@@ -1,8 +1,8 @@
-# PRD: Audio Recording Android App (ubiq-capture)
+# PRD: Audio Recording Android App (uCapture)
 
 ## 1. Introduction/Overview
 
-The ubiq-capture Android app is the first component of a three-part audio capture and processing system. This app enables users to record continuous audio from their device's microphone throughout the day, automatically chunking recordings into manageable file sizes and uploading them to cloud storage for later processing.
+The uCapture Android app is the first component of a three-part audio capture and processing system. This app enables users to record continuous audio from their device's microphone throughout the day, automatically chunking recordings into manageable file sizes and uploading them to cloud storage for later processing.
 
 **Problem Statement:** Users need a reliable, hands-free way to capture audio throughout their day without worrying about storage management, manual uploads, or file organization. The recordings will be processed by a separate backend system to generate transcripts and metadata, accessible via a web frontend.
 
@@ -65,7 +65,7 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 **FR-6:** The app must save recordings to local device storage temporarily until upload is complete.
 
-**FR-7:** The app must use a consistent file naming convention that includes timestamp with timezone (e.g., `ubiq-YYYYMMDD-HHMMSS-PDT-[chunk-number].mp3`). Metadata must include precise clock measurements (Unix timestamp with milliseconds) for recording start, recording end, and each GPS sample.
+**FR-7:** The app must use a consistent file naming convention that includes timestamp with timezone (e.g., `ucap-YYYYMMDD-HHMMSS-PDT-[chunk-number].mp3`). Metadata must include precise clock measurements (Unix timestamp with milliseconds) for recording start, recording end, and each GPS sample.
 
 ### 4.2 Settings & Configuration
 
@@ -291,9 +291,11 @@ The ubiq-capture Android app is the first component of a three-part audio captur
 
 ### 7.1 Android Specifications
 
-**TC-1:** Minimum SDK: Android 8.0 (API 26) or higher recommended
+**TC-1:** Minimum SDK: Android 10 (API 29) - chosen for security (receives updates), modern APIs (scoped storage, background tasks), and simpler permission model while maintaining 98% device coverage
 
-**TC-2:** Target SDK: Latest stable Android version
+**TC-2:** Target SDK: Android 15 (API 35) - required for Google Play Store compliance (August 2025+)
+
+**TC-2a:** Compile SDK: Android 16 (API 36) - latest available for development
 
 **TC-3:** Development language: Kotlin (chosen for modern Android development best practices, null safety, coroutines support, and official Google recommendation)
 

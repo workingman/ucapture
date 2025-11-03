@@ -96,11 +96,92 @@ All GR notes have been incorporated and removed from final PRD. Key feedback inc
 
 **Clean working tree:** Yes (as of last session)
 
+## Session 2 Summary (2025-11-03)
+
+### Completed: Development Environment & Project Setup
+
+**Development Environment:**
+- Installed Java JDK 17 (Temurin) - for Android builds
+- Installed Java JDK 25 (Temurin) - available for other uses
+- Configured Gradle to use Java 17 via `gradle.properties`
+- Installed Android Studio 2025.2.1.7
+- Installed Android SDK: API 29, 35, 36 with Build Tools 36.1.0
+- Created Pixel 9 emulator (API 35)
+- Updated `~/.zshrc` with JAVA_HOME and ANDROID_HOME environment variables
+
+**Project Naming Decision:**
+- Changed from "ubiq-capture" to **"uCapture"** (cleaner, easier to say)
+- Package name: `ca.dgbi.ucapture` (using dgbi.ca domain)
+- File prefix: `ucap-YYYYMMDD-HHMMSS-PDT-001.mp3`
+
+**Android SDK Versions (Updated from PRD):**
+- **Min SDK:** API 29 (Android 10) - for security, modern APIs, 98% coverage
+- **Target SDK:** API 35 (Android 15) - Google Play requirement
+- **Compile SDK:** API 36 (Android 16) - latest available
+- ~~Original: API 26~~ (rejected - too old, security concerns)
+
+**Task 1.0 Completed (7/9 subtasks):**
+- ✅ 1.1 Created Android project with Empty Compose Activity
+- ✅ 1.2 Configured project-level `build.gradle.kts` with version catalogs
+- ✅ 1.3 Configured `app/build.gradle.kts` with all dependencies:
+  - Hilt 2.52 (DI), Room 2.6.1 (DB), WorkManager 2.10.0
+  - Compose BOM 2024.11.00, Navigation 2.8.4
+  - Google Drive API, Play Services Location 21.3.0
+  - Coroutines 1.9.0, DataStore 1.1.1
+- ✅ 1.4 Set SDK versions (min 29, target 35, compile 36)
+- ✅ 1.5 Added all permissions to AndroidManifest.xml:
+  - Microphone, Location (fine/coarse), Calendar
+  - Internet, Network State, Foreground Service
+  - Notifications (API 13+), Wake Lock, Battery Optimization
+- ✅ 1.6 Created `UCaptureApplication.kt` with `@HiltAndroidApp`
+- ✅ 1.7 Created complete package structure:
+  - `data/` (model, local, remote, repository, preferences)
+  - `ui/` (recording, timeline, settings, components, navigation)
+  - `service/metadata/`
+  - `util/`, `di/`
+- ⏸️ 1.8 ProGuard/R8 rules - TODO
+- ⏸️ 1.9 .gitignore patterns - TODO
+
+**Build Status:** ✅ BUILD SUCCESSFUL
+
+**Key Technical Decisions:**
+- Using Kotlin 2.0.21 with Compose plugin
+- Java 17 for Android builds (Java 25 caused Kotlin compatibility issues)
+- Fixed packaging conflicts with Google libraries (excluded META-INF files)
+- Version catalogs in `libs.versions.toml` for dependency management
+
+### Project Structure
+```
+ubiq-capture/
+├── tasks/                          # Documentation (PRDs, tasks, session notes)
+│   ├── 0001-prd-audio-recording-app.md
+│   ├── tasks-0001-prd-audio-recording-app.md
+│   └── SESSION-NOTES.md
+└── android/                        # uCapture Android app
+    ├── app/src/main/java/ca/dgbi/ucapture/
+    │   ├── UCaptureApplication.kt  # Hilt application
+    │   ├── MainActivity.kt         # @AndroidEntryPoint
+    │   ├── data/
+    │   ├── ui/
+    │   ├── service/
+    │   ├── util/
+    │   └── di/
+    ├── build.gradle.kts
+    ├── app/build.gradle.kts
+    └── gradle/libs.versions.toml
+```
+
 ## Next Steps
 
-1. **Android SDK Installation** - Set up Android Studio and dependencies
-2. **Task 1.1:** Create new Android Studio project
-3. Begin implementation following task list in order
+**Remaining from Task 1.0:**
+- 1.8 Configure ProGuard/R8 rules for production builds
+- 1.9 Set up .gitignore patterns
+
+**Task 2.0:** Implement core audio recording service
+**Task 3.0:** Implement metadata collection (location & calendar)
+**Task 4.0:** Implement local storage (Room database)
+**Task 5.0:** Implement Google Drive integration
+**Task 6.0:** Implement UI (recording, timeline, settings)
 
 ## Development Workflow
 
@@ -177,5 +258,5 @@ If unclear during implementation:
 
 ---
 
-**Last Updated:** 2025-11-02 (Initial session)
-**Status:** Planning complete, ready for implementation
+**Last Updated:** 2025-11-03 (Session 2: Dev environment setup & project initialization)
+**Status:** Task 1.0 mostly complete (7/9), project building successfully, ready for feature implementation

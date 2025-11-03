@@ -1,4 +1,4 @@
-# Task List: Audio Recording Android App (ubiq-capture)
+# Task List: Audio Recording Android App (uCapture)
 
 Based on PRD: `0001-prd-audio-recording-app.md`
 
@@ -11,80 +11,81 @@ This is a new Android project with no existing codebase. The implementation will
 - **Database:** Room
 - **DI:** Hilt/Dagger
 - **Background Work:** WorkManager, Foreground Service
-- **Target SDK:** Latest stable Android version
-- **Minimum SDK:** Android 8.0 (API 26)
+- **Compile SDK:** Android 16 (API 36)
+- **Target SDK:** Android 15 (API 35)
+- **Minimum SDK:** Android 10 (API 29)
 
 ## Relevant Files
 
 ### Core Application Structure
 - `app/build.gradle.kts` - App-level Gradle configuration with all dependencies
 - `app/src/main/AndroidManifest.xml` - App manifest with permissions and service declarations
-- `app/src/main/java/com/ubiq/capture/UbiqCaptureApplication.kt` - Application class with Hilt setup
+- `app/src/main/java/ca/dgbi/ucapture/UCaptureApplication.kt` - Application class with Hilt setup
 
 ### Data Layer
-- `app/src/main/java/com/ubiq/capture/data/model/Recording.kt` - Recording entity model
-- `app/src/main/java/com/ubiq/capture/data/model/LocationSample.kt` - Location data model
-- `app/src/main/java/com/ubiq/capture/data/model/CalendarEvent.kt` - Calendar event model
-- `app/src/main/java/com/ubiq/capture/data/model/RecordingMetadata.kt` - Complete metadata model
-- `app/src/main/java/com/ubiq/capture/data/local/AppDatabase.kt` - Room database
-- `app/src/main/java/com/ubiq/capture/data/local/RecordingDao.kt` - Room DAO for recordings
-- `app/src/main/java/com/ubiq/capture/data/local/LocationDao.kt` - Room DAO for location samples
-- `app/src/main/java/com/ubiq/capture/data/local/CalendarDao.kt` - Room DAO for calendar events
-- `app/src/main/java/com/ubiq/capture/data/repository/RecordingRepository.kt` - Recording data repository
-- `app/src/main/java/com/ubiq/capture/data/repository/MetadataRepository.kt` - Metadata repository
+- `app/src/main/java/ca/dgbi/ucapture/data/model/Recording.kt` - Recording entity model
+- `app/src/main/java/ca/dgbi/ucapture/data/model/LocationSample.kt` - Location data model
+- `app/src/main/java/ca/dgbi/ucapture/data/model/CalendarEvent.kt` - Calendar event model
+- `app/src/main/java/ca/dgbi/ucapture/data/model/RecordingMetadata.kt` - Complete metadata model
+- `app/src/main/java/ca/dgbi/ucapture/data/local/AppDatabase.kt` - Room database
+- `app/src/main/java/ca/dgbi/ucapture/data/local/RecordingDao.kt` - Room DAO for recordings
+- `app/src/main/java/ca/dgbi/ucapture/data/local/LocationDao.kt` - Room DAO for location samples
+- `app/src/main/java/ca/dgbi/ucapture/data/local/CalendarDao.kt` - Room DAO for calendar events
+- `app/src/main/java/ca/dgbi/ucapture/data/repository/RecordingRepository.kt` - Recording data repository
+- `app/src/main/java/ca/dgbi/ucapture/data/repository/MetadataRepository.kt` - Metadata repository
 
 ### Cloud Storage
-- `app/src/main/java/com/ubiq/capture/data/remote/CloudStorageProvider.kt` - Storage interface
-- `app/src/main/java/com/ubiq/capture/data/remote/GoogleDriveStorage.kt` - Google Drive implementation
-- `app/src/main/java/com/ubiq/capture/data/remote/UploadWorker.kt` - WorkManager for uploads
+- `app/src/main/java/ca/dgbi/ucapture/data/remote/CloudStorageProvider.kt` - Storage interface
+- `app/src/main/java/ca/dgbi/ucapture/data/remote/GoogleDriveStorage.kt` - Google Drive implementation
+- `app/src/main/java/ca/dgbi/ucapture/data/remote/UploadWorker.kt` - WorkManager for uploads
 
 ### Recording Service
-- `app/src/main/java/com/ubiq/capture/service/RecordingService.kt` - Foreground recording service
-- `app/src/main/java/com/ubiq/capture/service/AudioRecorder.kt` - Audio recording logic
-- `app/src/main/java/com/ubiq/capture/service/ChunkManager.kt` - Recording chunk management
+- `app/src/main/java/ca/dgbi/ucapture/service/RecordingService.kt` - Foreground recording service
+- `app/src/main/java/ca/dgbi/ucapture/service/AudioRecorder.kt` - Audio recording logic
+- `app/src/main/java/ca/dgbi/ucapture/service/ChunkManager.kt` - Recording chunk management
 
 ### Metadata Collection
-- `app/src/main/java/com/ubiq/capture/service/metadata/MetadataCollector.kt` - Metadata collector interface
-- `app/src/main/java/com/ubiq/capture/service/metadata/LocationMetadataCollector.kt` - GPS tracking
-- `app/src/main/java/com/ubiq/capture/service/metadata/CalendarMetadataCollector.kt` - Calendar queries
+- `app/src/main/java/ca/dgbi/ucapture/service/metadata/MetadataCollector.kt` - Metadata collector interface
+- `app/src/main/java/ca/dgbi/ucapture/service/metadata/LocationMetadataCollector.kt` - GPS tracking
+- `app/src/main/java/ca/dgbi/ucapture/service/metadata/CalendarMetadataCollector.kt` - Calendar queries
 
 ### UI Layer
-- `app/src/main/java/com/ubiq/capture/ui/MainActivity.kt` - Main activity
-- `app/src/main/java/com/ubiq/capture/ui/navigation/AppNavigation.kt` - Navigation setup
-- `app/src/main/java/com/ubiq/capture/ui/recording/RecordingScreen.kt` - Main recording screen
-- `app/src/main/java/com/ubiq/capture/ui/recording/RecordingViewModel.kt` - Recording view model
-- `app/src/main/java/com/ubiq/capture/ui/timeline/TimelineScreen.kt` - Timeline replay screen
-- `app/src/main/java/com/ubiq/capture/ui/timeline/TimelineViewModel.kt` - Timeline view model
-- `app/src/main/java/com/ubiq/capture/ui/timeline/AudioPlayer.kt` - Audio playback handler
-- `app/src/main/java/com/ubiq/capture/ui/settings/SettingsScreen.kt` - Settings screen
-- `app/src/main/java/com/ubiq/capture/ui/settings/SettingsViewModel.kt` - Settings view model
-- `app/src/main/java/com/ubiq/capture/ui/components/RecordButton.kt` - Custom record button component
-- `app/src/main/java/com/ubiq/capture/ui/components/TimelineItem.kt` - Timeline list item component
+- `app/src/main/java/ca/dgbi/ucapture/ui/MainActivity.kt` - Main activity
+- `app/src/main/java/ca/dgbi/ucapture/ui/navigation/AppNavigation.kt` - Navigation setup
+- `app/src/main/java/ca/dgbi/ucapture/ui/recording/RecordingScreen.kt` - Main recording screen
+- `app/src/main/java/ca/dgbi/ucapture/ui/recording/RecordingViewModel.kt` - Recording view model
+- `app/src/main/java/ca/dgbi/ucapture/ui/timeline/TimelineScreen.kt` - Timeline replay screen
+- `app/src/main/java/ca/dgbi/ucapture/ui/timeline/TimelineViewModel.kt` - Timeline view model
+- `app/src/main/java/ca/dgbi/ucapture/ui/timeline/AudioPlayer.kt` - Audio playback handler
+- `app/src/main/java/ca/dgbi/ucapture/ui/settings/SettingsScreen.kt` - Settings screen
+- `app/src/main/java/ca/dgbi/ucapture/ui/settings/SettingsViewModel.kt` - Settings view model
+- `app/src/main/java/ca/dgbi/ucapture/ui/components/RecordButton.kt` - Custom record button component
+- `app/src/main/java/ca/dgbi/ucapture/ui/components/TimelineItem.kt` - Timeline list item component
 
 ### Permissions & Utilities
-- `app/src/main/java/com/ubiq/capture/util/PermissionManager.kt` - Permission handling utility
-- `app/src/main/java/com/ubiq/capture/util/FileManager.kt` - File operations utility
-- `app/src/main/java/com/ubiq/capture/util/HashUtil.kt` - MD5 hashing utility
-- `app/src/main/java/com/ubiq/capture/util/TimeFormatter.kt` - Timestamp formatting with timezone
-- `app/src/main/java/com/ubiq/capture/util/StorageMonitor.kt` - Storage space monitoring
-- `app/src/main/java/com/ubiq/capture/util/RetentionManager.kt` - Local file retention logic
+- `app/src/main/java/ca/dgbi/ucapture/util/PermissionManager.kt` - Permission handling utility
+- `app/src/main/java/ca/dgbi/ucapture/util/FileManager.kt` - File operations utility
+- `app/src/main/java/ca/dgbi/ucapture/util/HashUtil.kt` - MD5 hashing utility
+- `app/src/main/java/ca/dgbi/ucapture/util/TimeFormatter.kt` - Timestamp formatting with timezone
+- `app/src/main/java/ca/dgbi/ucapture/util/StorageMonitor.kt` - Storage space monitoring
+- `app/src/main/java/ca/dgbi/ucapture/util/RetentionManager.kt` - Local file retention logic
 
 ### Dependency Injection
-- `app/src/main/java/com/ubiq/capture/di/AppModule.kt` - Hilt app module
-- `app/src/main/java/com/ubiq/capture/di/DatabaseModule.kt` - Room database module
-- `app/src/main/java/com/ubiq/capture/di/NetworkModule.kt` - Network/storage module
-- `app/src/main/java/com/ubiq/capture/di/ServiceModule.kt` - Service module
+- `app/src/main/java/ca/dgbi/ucapture/di/AppModule.kt` - Hilt app module
+- `app/src/main/java/ca/dgbi/ucapture/di/DatabaseModule.kt` - Room database module
+- `app/src/main/java/ca/dgbi/ucapture/di/NetworkModule.kt` - Network/storage module
+- `app/src/main/java/ca/dgbi/ucapture/di/ServiceModule.kt` - Service module
 
 ### Preferences
-- `app/src/main/java/com/ubiq/capture/data/preferences/AppPreferences.kt` - DataStore preferences
+- `app/src/main/java/ca/dgbi/ucapture/data/preferences/AppPreferences.kt` - DataStore preferences
 
 ### Test Files
-- `app/src/test/java/com/ubiq/capture/ui/recording/RecordingViewModelTest.kt` - Recording ViewModel tests
-- `app/src/test/java/com/ubiq/capture/ui/timeline/TimelineViewModelTest.kt` - Timeline ViewModel tests
-- `app/src/test/java/com/ubiq/capture/data/repository/RecordingRepositoryTest.kt` - Repository tests
-- `app/src/test/java/com/ubiq/capture/util/HashUtilTest.kt` - Utility tests
-- `app/src/androidTest/java/com/ubiq/capture/service/RecordingServiceTest.kt` - Service integration tests
-- `app/src/androidTest/java/com/ubiq/capture/data/local/AppDatabaseTest.kt` - Database tests
+- `app/src/test/java/ca/dgbi/ucapture/ui/recording/RecordingViewModelTest.kt` - Recording ViewModel tests
+- `app/src/test/java/ca/dgbi/ucapture/ui/timeline/TimelineViewModelTest.kt` - Timeline ViewModel tests
+- `app/src/test/java/ca/dgbi/ucapture/data/repository/RecordingRepositoryTest.kt` - Repository tests
+- `app/src/test/java/ca/dgbi/ucapture/util/HashUtilTest.kt` - Utility tests
+- `app/src/androidTest/java/ca/dgbi/ucapture/service/RecordingServiceTest.kt` - Service integration tests
+- `app/src/androidTest/java/ca/dgbi/ucapture/data/local/AppDatabaseTest.kt` - Database tests
 
 ### Notes
 
@@ -99,13 +100,13 @@ This is a new Android project with no existing codebase. The implementation will
 ## Tasks
 
 - [ ] 1.0 Set up Android project structure and dependencies
-  - [ ] 1.1 Create new Android Studio project with Empty Compose Activity template
-  - [ ] 1.2 Configure `build.gradle.kts` (project level) with Kotlin DSL and version catalogs
-  - [ ] 1.3 Configure `app/build.gradle.kts` with all required dependencies (Hilt, Room, WorkManager, Compose, Coroutines, Google Drive API)
-  - [ ] 1.4 Set minimum SDK to API 26 (Android 8.0) and target SDK to latest stable
-  - [ ] 1.5 Add internet, microphone, location, calendar, and foreground service permissions to AndroidManifest.xml
-  - [ ] 1.6 Set up Hilt by creating `UbiqCaptureApplication.kt` with `@HiltAndroidApp`
-  - [ ] 1.7 Create base package structure (`data`, `domain`, `ui`, `service`, `util`, `di`)
+  - [x] 1.1 Create new Android Studio project with Empty Compose Activity template
+  - [x] 1.2 Configure `build.gradle.kts` (project level) with Kotlin DSL and version catalogs
+  - [x] 1.3 Configure `app/build.gradle.kts` with all required dependencies (Hilt, Room, WorkManager, Compose, Coroutines, Google Drive API)
+  - [x] 1.4 Set minimum SDK to API 29 (Android 10), target SDK to API 35 (Android 15), and compile SDK to API 36 (Android 16)
+  - [x] 1.5 Add internet, microphone, location, calendar, and foreground service permissions to AndroidManifest.xml
+  - [x] 1.6 Set up Hilt by creating `UCaptureApplication.kt` with `@HiltAndroidApp`
+  - [x] 1.7 Create base package structure (`data`, `domain`, `ui`, `service`, `util`, `di`)
   - [ ] 1.8 Configure ProGuard/R8 rules for production builds
   - [ ] 1.9 Set up version control ignore patterns for Android Studio files
 
@@ -118,7 +119,7 @@ This is a new Android project with no existing codebase. The implementation will
   - [ ] 2.6 Implement pause/resume recording functionality
   - [ ] 2.7 Implement stop recording and finalize file
   - [ ] 2.8 Create `ChunkManager.kt` to handle automatic chunking (30-60 minute default)
-  - [ ] 2.9 Implement file naming convention with timestamp and timezone (e.g., `ubiq-YYYYMMDD-HHMMSS-PDT-001.mp3`)
+  - [ ] 2.9 Implement file naming convention with timestamp and timezone (e.g., `ucap-YYYYMMDD-HHMMSS-PDT-001.mp3`)
   - [ ] 2.10 Add wake lock management to prevent system from stopping recording
   - [ ] 2.11 Handle doze mode and battery optimization exemptions
   - [ ] 2.12 Integrate metadata collectors to associate GPS and calendar data with chunks

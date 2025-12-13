@@ -12,10 +12,25 @@ Android audio recording app with GPS/calendar metadata, Google Drive upload.
 |------|--------|
 | 1.0 Project setup | Complete |
 | 2.0 Audio recording service | Complete |
-| 3.0 Metadata collection | **Next** |
-| 4.0 Local storage (Room) | Pending |
+| 3.0 Metadata collection | Complete |
+| 4.0 Local storage (Room) | **Next** |
 | 5.0 Google Drive integration | Pending |
 | 6.0 UI | Pending |
+
+## Task 3.0 Implementation (Complete)
+
+| File | Purpose |
+|------|---------|
+| `service/metadata/LocationMetadataCollector.kt` | Fused Location Provider, periodic sampling (1 min default) |
+| `service/metadata/CalendarMetadataCollector.kt` | Calendar Provider API, per-chunk caching |
+
+**Tests:** 24 unit tests in `test/.../service/metadata/`
+
+**Key decisions:**
+- PRIORITY_BALANCED_POWER_ACCURACY for location (battery efficient)
+- Calendar queries cached per chunk (not continuous)
+- Both collectors handle missing permissions gracefully (continue without data)
+- Collectors registered with MetadataCollectorManager via Hilt
 
 ## Task 2.0 Implementation (Complete)
 
@@ -40,16 +55,14 @@ Android audio recording app with GPS/calendar metadata, Google Drive upload.
 - Chunk timer pauses when recording pauses
 - MetadataCollectorManager already wired into RecordingService
 
-## Task 3.0 Subtasks (Next)
+## Task 4.0 Subtasks (Next)
 From `tasks/tasks-0001-prd-audio-recording-app.md`:
-- 3.1-3.8: LocationMetadataCollector (Fused Location Provider, 1-min sampling)
-- 3.9-3.13: CalendarMetadataCollector (Calendar Provider API)
-- 3.14: Store metadata in Room with foreign keys to recordings
+- 4.1: Create Room entities (Recording, LocationSample, CalendarEvent)
+- 4.2-4.6: DAOs and relationships
+- 4.7-4.8: Repositories
+- 4.9-4.18: File management, hashing, retention
 
-Key requirements:
-- Handle permissions gracefully (continue without if denied)
-- Cache calendar queries (once per chunk)
-- Periodic location sampling (configurable interval)
+Note: Task 3.14 (metadata Room storage) is part of Task 4.0
 
 ## Key Files
 ```

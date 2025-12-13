@@ -3,6 +3,8 @@ package ca.dgbi.ucapture.di
 import android.content.Context
 import ca.dgbi.ucapture.service.AudioRecorder
 import ca.dgbi.ucapture.service.ChunkManager
+import ca.dgbi.ucapture.service.metadata.CalendarMetadataCollector
+import ca.dgbi.ucapture.service.metadata.LocationMetadataCollector
 import ca.dgbi.ucapture.service.metadata.MetadataCollectorManager
 import dagger.Module
 import dagger.Provides
@@ -31,7 +33,29 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideMetadataCollectorManager(): MetadataCollectorManager {
-        return MetadataCollectorManager()
+    fun provideLocationMetadataCollector(
+        @ApplicationContext context: Context
+    ): LocationMetadataCollector {
+        return LocationMetadataCollector(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideCalendarMetadataCollector(
+        @ApplicationContext context: Context
+    ): CalendarMetadataCollector {
+        return CalendarMetadataCollector(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideMetadataCollectorManager(
+        locationCollector: LocationMetadataCollector,
+        calendarCollector: CalendarMetadataCollector
+    ): MetadataCollectorManager {
+        return MetadataCollectorManager().apply {
+            register(locationCollector)
+            register(calendarCollector)
+        }
     }
 }

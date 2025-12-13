@@ -1,15 +1,35 @@
+# Built artifacts
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
+.gradle/
+build/
 /captures
-.externalNativeBuild
-.cxx
+
+# Local configuration
 local.properties
+
+# IDE - Android Studio / IntelliJ
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetSelector.xml
+.idea/kotlinc.xml
+.idea/misc.xml
+*.iws
+
+# Native build
+.externalNativeBuild/
+.cxx/
+
+# macOS
+.DS_Store
+
+# Signing
+*.jks
+*.keystore
+signing.properties
+
+# Google Services (contains API keys)
+google-services.json

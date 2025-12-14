@@ -17,43 +17,15 @@ Android audio recording app with GPS/calendar metadata, Google Drive upload.
 | 5.0 Google Drive integration | Pending |
 | 6.0 UI | Pending |
 
-## Task 3.0 Implementation (Complete)
+## Architecture
+See `docs/ARCHITECTURE.md` for full architecture documentation with diagrams.
 
-| File | Purpose |
-|------|---------|
-| `service/metadata/LocationMetadataCollector.kt` | Fused Location Provider, periodic sampling (1 min default) |
-| `service/metadata/CalendarMetadataCollector.kt` | Calendar Provider API, per-chunk caching |
-
-**Tests:** 24 unit tests in `test/.../service/metadata/`
-
-**Key decisions:**
-- PRIORITY_BALANCED_POWER_ACCURACY for location (battery efficient)
-- Calendar queries cached per chunk (not continuous)
-- Both collectors handle missing permissions gracefully (continue without data)
-- Collectors registered with MetadataCollectorManager via Hilt
-
-## Task 2.0 Implementation (Complete)
-
-| File | Purpose |
-|------|---------|
-| `service/RecordingService.kt` | Foreground service, notification, state machine, wake lock |
-| `service/AudioRecorder.kt` | MediaRecorder wrapper, AAC @ 64/128/256 kbps, pause/resume |
-| `service/ChunkManager.kt` | Auto-chunking (5-120 min), sequential numbering |
-| `service/metadata/MetadataCollector.kt` | Interface + MetadataCollectorManager (stubs) |
-| `service/metadata/LocationSample.kt` | GPS data class |
-| `service/metadata/CalendarEvent.kt` | Calendar event data class |
-| `util/PowerUtils.kt` | Battery optimization utilities |
-| `di/AppModule.kt` | Hilt providers |
-
-**Tests:** 29 unit tests in `test/.../service/` (AudioRecorderTest, ChunkManagerTest)
-
-**File naming:** `ucap-YYYYMMDD-HHMMSS-TZ-NNN.m4a`
-
-**Key decisions:**
-- AAC codec (not MP3 - Android doesn't encode MP3)
-- Wake lock held during recording
-- Chunk timer pauses when recording pauses
-- MetadataCollectorManager already wired into RecordingService
+**Key components:**
+- `RecordingService` - Foreground service orchestrator
+- `AudioRecorder` - MediaRecorder wrapper (AAC @ 64/128/256 kbps)
+- `ChunkManager` - Auto file rotation (30 min default)
+- `LocationMetadataCollector` - Fused Location Provider (1 min sampling)
+- `CalendarMetadataCollector` - Calendar Provider API (per-chunk caching)
 
 ## Task 4.0 Subtasks (Next)
 From `tasks/tasks-0001-prd-audio-recording-app.md`:
@@ -62,21 +34,19 @@ From `tasks/tasks-0001-prd-audio-recording-app.md`:
 - 4.7-4.8: Repositories
 - 4.9-4.18: File management, hashing, retention
 
-Note: Task 3.14 (metadata Room storage) is part of Task 4.0
-
 ## Key Files
 ```
-android/
-├── app/src/main/java/ca/dgbi/ucapture/
-│   ├── service/          # RecordingService, AudioRecorder, ChunkManager
-│   ├── service/metadata/ # MetadataCollector interface, data classes
-│   ├── di/               # AppModule
-│   └── util/             # PowerUtils
-└── app/src/test/.../service/  # Unit tests
+android/app/src/main/java/ca/dgbi/ucapture/
+├── service/          # RecordingService, AudioRecorder, ChunkManager
+├── service/metadata/ # Collectors and data classes
+├── di/               # Hilt modules
+└── util/             # PowerUtils
+
+docs/ARCHITECTURE.md  # Full architecture documentation
 
 tasks/
-├── 0001-prd-audio-recording-app.md      # PRD
-└── tasks-0001-prd-audio-recording-app.md # Full task list
+├── 0001-prd-audio-recording-app.md       # PRD
+└── tasks-0001-prd-audio-recording-app.md # Task list
 ```
 
 ## Commands
@@ -85,6 +55,9 @@ cd /Users/gwr/Documents/dev/ubiq-capture/android
 ./gradlew build
 ./gradlew testDebugUnitTest
 ```
+
+## Tests
+- 53 unit tests passing (AudioRecorder, ChunkManager, LocationMetadataCollector, CalendarMetadataCollector)
 
 ---
 **Updated:** 2025-12-13

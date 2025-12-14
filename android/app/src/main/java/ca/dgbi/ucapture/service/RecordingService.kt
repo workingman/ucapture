@@ -13,7 +13,12 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import ca.dgbi.ucapture.MainActivity
 import ca.dgbi.ucapture.R
+import ca.dgbi.ucapture.data.repository.RecordingRepository
+import ca.dgbi.ucapture.service.metadata.CalendarMetadataCollector
+import ca.dgbi.ucapture.service.metadata.LocationMetadataCollector
 import ca.dgbi.ucapture.service.metadata.MetadataCollectorManager
+import ca.dgbi.ucapture.data.remote.UploadWorker
+import ca.dgbi.ucapture.util.HashUtil
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -63,7 +68,17 @@ class RecordingService : Service() {
     @Inject
     lateinit var metadataCollectorManager: MetadataCollectorManager
 
+    @Inject
+    lateinit var recordingRepository: RecordingRepository
+
+    @Inject
+    lateinit var locationCollector: LocationMetadataCollector
+
+    @Inject
+    lateinit var calendarCollector: CalendarMetadataCollector
+
     private var wakeLock: PowerManager.WakeLock? = null
+    private var chunkCollectionJob: Job? = null
     private val binder = RecordingBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var durationJob: Job? = null
@@ -162,6 +177,14 @@ class RecordingService : Service() {
             serviceScope.launch {
                 metadataCollectorManager.startAll()
             }
+
+            // Subscribe to completed chunks for persistence
+            chunkCollectionJob?.cancel()
+            chunkCollectionJob = serviceScope.launch {
+                chunkManager.completedChunks.collect { completedChunk ->
+                    persistCompletedChunk(completedChunk)
+                }
+            }
         } catch (e: AudioRecorder.AudioRecorderException) {
             _state.value = State.IDLE
             _currentFile.value = null
@@ -213,6 +236,10 @@ class RecordingService : Service() {
 
         stopDurationTimer()
         releaseWakeLock()
+
+        // Stop chunk collection subscription
+        chunkCollectionJob?.cancel()
+        chunkCollectionJob = null
 
         // Stop metadata collectors
         serviceScope.launch {
@@ -346,5 +373,42 @@ class RecordingService : Service() {
             }
         }
         wakeLock = null
+    }
+
+    /**
+     * Persist a completed chunk with its metadata to the database.
+     *
+     * Called when a chunk completes (either via rotation or session end).
+     * Collects location and calendar metadata, saves to Room, and schedules upload.
+     */
+    private suspend fun persistCompletedChunk(chunk: ChunkManager.CompletedChunk) {
+        // Collect metadata for this chunk
+        val locationSamples = locationCollector.getMetadataForChunk(chunk)
+        val calendarEvents = calendarCollector.getMetadataForChunk(chunk)
+
+        // Persist to database
+        val recordingId = recordingRepository.saveCompletedChunk(
+            chunk = chunk,
+            locationSamples = locationSamples,
+            calendarEvents = calendarEvents
+        )
+
+        // Calculate and store MD5 hash for later verification
+        val md5Hash = HashUtil.md5(chunk.file)
+        if (md5Hash != null) {
+            recordingRepository.updateMd5Hash(recordingId, md5Hash)
+        }
+
+        // Schedule upload (will be implemented in Phase 3)
+        scheduleUpload(recordingId)
+    }
+
+    /**
+     * Schedule a recording for upload to cloud storage.
+     *
+     * Uses WorkManager to ensure uploads complete even if app is backgrounded.
+     */
+    private fun scheduleUpload(recordingId: Long) {
+        UploadWorker.enqueue(applicationContext, recordingId)
     }
 }

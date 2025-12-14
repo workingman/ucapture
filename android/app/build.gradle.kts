@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,9 +8,19 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Load local.properties for secrets
+val localProperties = Properties().apply {
+    val localPropsFile = rootProject.file("local.properties")
+    if (localPropsFile.exists()) load(localPropsFile.inputStream())
+}
+
 android {
     namespace = "ca.dgbi.ucapture"
     compileSdk = 36
+
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 
     defaultConfig {
         applicationId = "ca.dgbi.ucapture"
@@ -18,6 +30,13 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Google OAuth Client ID from local.properties
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            "\"${localProperties.getProperty("GOOGLE_WEB_CLIENT_ID", "")}\""
+        )
     }
 
     buildTypes {
@@ -38,6 +57,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
@@ -75,17 +95,26 @@ dependencies {
 
     // WorkManager for background tasks
     implementation(libs.work.runtime.ktx)
+    implementation(libs.hilt.work)
+    ksp(libs.hilt.work.compiler)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // Google Drive API
     implementation(libs.google.api.client)
     implementation(libs.google.drive.api)
 
-    // Google Play Services (Location)
+    // Credential Manager for Google Sign-In
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services.auth)
+    implementation(libs.google.id)
+
+    // Google Play Services (Location and Auth)
     implementation(libs.play.services.location)
+    implementation(libs.play.services.auth)
 
     // DataStore for preferences
     implementation(libs.datastore.preferences)

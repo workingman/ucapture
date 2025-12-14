@@ -37,8 +37,8 @@ class ChunkManager @Inject constructor() {
     )
 
     companion object {
-        const val DEFAULT_CHUNK_DURATION_MINUTES = 30L
-        const val MIN_CHUNK_DURATION_MINUTES = 5L
+        const val DEFAULT_CHUNK_DURATION_MINUTES = 1L  // TODO: Change back to 30L for production
+        const val MIN_CHUNK_DURATION_MINUTES = 1L  // TODO: Change back to 5L for production
         const val MAX_CHUNK_DURATION_MINUTES = 120L
 
         private val TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")

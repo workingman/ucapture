@@ -13,51 +13,68 @@ Android audio recording app with GPS/calendar metadata, Google Drive upload.
 | 1.0 Project setup | Complete |
 | 2.0 Audio recording service | Complete |
 | 3.0 Metadata collection | Complete |
-| 4.0 Local storage (Room) | **Next** |
-| 5.0 Google Drive integration | Pending |
-| 6.0 UI | Pending |
+| 4.0 Local storage (Room) | Complete |
+| 5.0 Google Drive integration | **Partial** - auth works, upload has token persistence bug |
+| 6.0 UI | Complete |
 
-## Architecture
-See `docs/ARCHITECTURE.md` for full architecture documentation with diagrams.
+## Current Issue: Upload Worker Token Persistence
 
-**Key components:**
-- `RecordingService` - Foreground service orchestrator
-- `AudioRecorder` - MediaRecorder wrapper (AAC @ 64/128/256 kbps)
-- `ChunkManager` - Auto file rotation (30 min default)
-- `LocationMetadataCollector` - Fused Location Provider (1 min sampling)
-- `CalendarMetadataCollector` - Calendar Provider API (per-chunk caching)
+**Problem:** UploadWorker returns RETRY because access token is stored in memory only.
 
-## Task 4.0 Subtasks (Next)
-From `tasks/tasks-0001-prd-audio-recording-app.md`:
-- 4.1: Create Room entities (Recording, LocationSample, CalendarEvent)
-- 4.2-4.6: DAOs and relationships
-- 4.7-4.8: Repositories
-- 4.9-4.18: File management, hashing, retention
+- `GoogleDriveAuthManager` stores `accessToken` as a class variable
+- WorkManager runs workers in different context where token isn't available
+- Worker checks `isSignedIn()` which requires token, fails, returns RETRY
 
-## Key Files
+**Fix needed:** Persist access token securely (EncryptedSharedPreferences or DataStore with encryption).
+
+## What's Working
+- Google Sign-In via Credential Manager
+- Drive authorization (gets access token)
+- Folder creation/selection in Drive
+- Recording with chunking (1-min chunks for testing)
+- Chunks emit to completedChunks flow
+- WorkManager schedules upload jobs
+- UI shows pending upload count
+
+## Google OAuth Setup (Complete)
+- Google Cloud Console project configured
+- Drive API enabled
+- OAuth consent screen with `drive.file` scope
+- Web Client ID in `local.properties`: `GOOGLE_WEB_CLIENT_ID=741090335587-n423313itvauv8cn0jtsi70c3jhidlu0.apps.googleusercontent.com`
+- Android Client ID configured with SHA-1 fingerprint
+
+## Testing Notes
+- Chunk duration set to 1 minute for testing (ChunkManager.kt lines 40-41)
+- TODO comments mark values to restore for production (30min default, 5min minimum)
+
+## Key Files Modified This Session
 ```
-android/app/src/main/java/ca/dgbi/ucapture/
-├── service/          # RecordingService, AudioRecorder, ChunkManager
-├── service/metadata/ # Collectors and data classes
-├── di/               # Hilt modules
-└── util/             # PowerUtils
-
-docs/ARCHITECTURE.md  # Full architecture documentation
-
-tasks/
-├── 0001-prd-audio-recording-app.md       # PRD
-└── tasks-0001-prd-audio-recording-app.md # Task list
+data/remote/GoogleDriveAuthManager.kt  # Auth flow with AuthorizationRequest
+data/remote/GoogleDriveStorage.kt      # findOrCreateFolder(), logging
+ui/settings/SettingsScreen.kt          # Folder name input dialog
+ui/settings/SettingsViewModel.kt       # createOrSelectFolder()
+service/ChunkManager.kt                # Chunk duration (1 min for testing)
+gradle/libs.versions.toml              # Added coroutines-play-services
+app/build.gradle.kts                   # BuildConfig for client ID
 ```
+
+## Next Steps
+1. **Fix token persistence** - Store access token in EncryptedSharedPreferences
+2. **Test full upload flow** - Verify files appear in Drive folder
+3. **Restore chunk duration** - Change back to 30 min for production
+4. **Handle token refresh** - Access tokens expire, need refresh logic
 
 ## Commands
 ```bash
 cd /Users/gwr/Documents/dev/ubiq-capture/android
 ./gradlew build
-./gradlew testDebugUnitTest
+./gradlew installDebug
+adb -s 48131FDAQ003B8 logcat -d | grep -iE "ucapture|upload|drive"
 ```
 
 ## Tests
-- 53 unit tests passing (AudioRecorder, ChunkManager, LocationMetadataCollector, CalendarMetadataCollector)
+- 109 unit tests (76 original + 33 for UI ViewModels)
+- Some test file lint issues (Kotlin tooling bug, not blocking)
 
 ---
 **Updated:** 2025-12-13

@@ -8,15 +8,28 @@
 
 ## Subagent Usage
 
+**Philosophy:** Main session orchestrates and makes decisions; subagents do heavy lifting. This preserves context in the main session for longer tasks.
+
 **Use the `Plan` agent** before implementing complex features:
 - Multi-file changes (Room entities + DAOs + repositories)
 - Architectural decisions
 - Example: `"Use the Plan agent to design the Room schema before implementing"`
 
-**Use the `Explore` agent** for codebase questions:
+**Use the `Explore` agent** for codebase questions (instead of reading files directly):
 - "How does ChunkManager integrate with RecordingService?"
 - "Find all uses of MetadataCollector"
 - "What patterns does this codebase use for X?"
+
+**Use `Task` agents for implementation** after a plan is approved:
+- Spawn separate agents for each phase/component
+- Each agent reads files, writes code, runs builds in its own context
+- Only summaries return to main session
+- Example: `"Implement Phase 1: wire RecordingService to RecordingRepository. Create the injection, add the flow subscription, and the persist method. Run the build to verify."`
+
+**Use `Task` agents for builds/tests** (avoids huge error output in main context):
+- `"Run ./gradlew build and report any compilation errors"`
+- `"Run tests and summarize failures"`
+- `"Write unit tests for GoogleDriveStorage covering auth, upload, and verify methods"`
 
 ## Project Conventions
 

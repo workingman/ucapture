@@ -29,11 +29,19 @@ googleDriveApi = "v3-rev20240914-2.0.0"
 # Navigation
 navigation = "2.8.4"
 
-# Google Play Services (for location)
+# Google Play Services (for location and auth)
 playServicesLocation = "21.3.0"
+playServicesAuth = "21.2.0"
 
 # DataStore for preferences
 datastore = "1.1.1"
+
+# Credential Manager for Google Sign-In
+credentialManager = "1.3.0"
+googleId = "1.1.1"
+
+# Hilt WorkManager integration
+hiltWork = "1.2.0"
 
 # KSP for annotation processing
 ksp = "2.0.21-1.0.28"
@@ -74,6 +82,7 @@ work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version
 # Coroutines
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
 # Google Drive API
 google-api-client = { group = "com.google.api-client", name = "google-api-client-android", version.ref = "googleApiClient" }
@@ -82,11 +91,21 @@ google-drive-api = { group = "com.google.apis", name = "google-api-services-driv
 # Navigation
 navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 
-# Google Play Services (Location)
+# Google Play Services (Location and Auth)
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playServicesAuth" }
 
 # DataStore
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+# Credential Manager
+credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentialManager" }
+credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentialManager" }
+google-id = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleId" }
+
+# Hilt WorkManager
+hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
+hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hiltWork" }
 
 # Testing
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }

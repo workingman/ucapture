@@ -1,80 +1,119 @@
-# uCapture Session Notes
+# SESSION_NOTES: ubiq-capture
 
-## Project
-Android audio recording app with GPS/calendar metadata, Google Drive upload.
-
-**Package:** `ca.dgbi.ucapture`
-**Stack:** Kotlin, Jetpack Compose, MVVM, Room, Hilt, WorkManager
-**SDK:** min 29, target 35, compile 36
-
-## Status
-| Task | Status |
-|------|--------|
-| 1.0 Project setup | Complete |
-| 2.0 Audio recording service | Complete |
-| 3.0 Metadata collection | Complete |
-| 4.0 Local storage (Room) | Complete |
-| 5.0 Google Drive integration | **Partial** - auth works, upload has token persistence bug |
-| 6.0 UI | Complete |
-
-## Current Issue: Upload Worker Token Persistence
-
-**Problem:** UploadWorker returns RETRY because access token is stored in memory only.
-
-- `GoogleDriveAuthManager` stores `accessToken` as a class variable
-- WorkManager runs workers in different context where token isn't available
-- Worker checks `isSignedIn()` which requires token, fails, returns RETRY
-
-**Fix needed:** Persist access token securely (EncryptedSharedPreferences or DataStore with encryption).
-
-## What's Working
-- Google Sign-In via Credential Manager
-- Drive authorization (gets access token)
-- Folder creation/selection in Drive
-- Recording with chunking (1-min chunks for testing)
-- Chunks emit to completedChunks flow
-- WorkManager schedules upload jobs
-- UI shows pending upload count
-
-## Google OAuth Setup (Complete)
-- Google Cloud Console project configured
-- Drive API enabled
-- OAuth consent screen with `drive.file` scope
-- Web Client ID in `local.properties`: `GOOGLE_WEB_CLIENT_ID=741090335587-n423313itvauv8cn0jtsi70c3jhidlu0.apps.googleusercontent.com`
-- Android Client ID configured with SHA-1 fingerprint
-
-## Testing Notes
-- Chunk duration set to 1 minute for testing (ChunkManager.kt lines 40-41)
-- TODO comments mark values to restore for production (30min default, 5min minimum)
-
-## Key Files Modified This Session
-```
-data/remote/GoogleDriveAuthManager.kt  # Auth flow with AuthorizationRequest
-data/remote/GoogleDriveStorage.kt      # findOrCreateFolder(), logging
-ui/settings/SettingsScreen.kt          # Folder name input dialog
-ui/settings/SettingsViewModel.kt       # createOrSelectFolder()
-service/ChunkManager.kt                # Chunk duration (1 min for testing)
-gradle/libs.versions.toml              # Added coroutines-play-services
-app/build.gradle.kts                   # BuildConfig for client ID
-```
-
-## Next Steps
-1. **Fix token persistence** - Store access token in EncryptedSharedPreferences
-2. **Test full upload flow** - Verify files appear in Drive folder
-3. **Restore chunk duration** - Change back to 30 min for production
-4. **Handle token refresh** - Access tokens expire, need refresh logic
-
-## Commands
-```bash
-cd /Users/gwr/Documents/dev/ubiq-capture/android
-./gradlew build
-./gradlew installDebug
-adb -s 48131FDAQ003B8 logcat -d | grep -iE "ucapture|upload|drive"
-```
-
-## Tests
-- 109 unit tests (76 original + 33 for UI ViewModels)
-- Some test file lint issues (Kotlin tooling bug, not blocking)
+**Updated:** 2026-02-03
+**Purpose:** Ubiquitous capture system for recording and archiving the data ocean of daily life
 
 ---
-**Updated:** 2025-12-13
+
+## Project Overview
+
+ubiq-capture is a multi-component system for comprehensive data capture across different modalities (audio, phone calls, financial records). Each subdirectory is an independent project targeting a specific capture domain, unified by the philosophy of automated, metadata-rich, cloud-synced archival.
+
+---
+
+## Components
+
+### 1. android-recorder/ (Production-ready)
+
+**What:** Android app (uCapture) for continuous background audio recording with contextual metadata.
+
+**Stack:** Kotlin, Jetpack Compose, Hilt DI, Room DB, WorkManager, Google Drive API
+
+**Status:** All 6 core tasks complete (project setup, recording service, metadata collection, local storage, Google Drive sync, UI). ~5,100 lines production code, ~2,050 lines test code across 12 test files.
+
+**Working features:**
+- Foreground recording service with wake locks and 30-min chunk rotation
+- GPS location sampling (60s intervals) and calendar event association
+- Google Sign-In with token persistence (EncryptedSharedPreferences)
+- Auto-upload to Google Drive with hourly retry for failures
+- JSON metadata sidecars alongside audio files
+- Compose UI: recording control, timeline browser, settings
+
+**Known issues:**
+- Chunk duration still set to 1 minute (testing value, needs restoration to 30 min)
+- Access token expiration handling incomplete (tokens expire after 1 hour)
+- Verbose debug logging in GoogleDriveAuthManager needs cleanup
+- Some stale tests in SettingsViewModelTest referencing removed methods
+
+---
+
+### 2. bluetooth-device/ (Planning phase)
+
+**What:** Raspberry Pi Zero 2W-based Bluetooth HFP audio bridge for recording phone calls with dual-channel audio (caller on left, user on right).
+
+**Stack (planned):** Raspberry Pi OS Lite, BlueZ + oFono, PipeWire + WirePlumber, FFmpeg, Bash/Python
+
+**Status:** PRD v1.0 complete (`device-prd.md`). No implementation code yet.
+
+**Planned features:**
+- Bluetooth HFP/HSP headset emulation (phone pairs to Pi as headset)
+- Audio passthrough to wired headset via USB audio adapter (target latency <= 30ms)
+- Dual-channel stereo WAV recording at 16kHz (optimized for Whisper transcription)
+- Rsync-based file offloading to workstation
+- 256GB MicroSD local storage
+
+**Roadmap:**
+- v1.0: USB audio interface (current spec)
+- v2.0: GPIO I2S audio for lower latency and smaller footprint
+
+---
+
+### 3. expensify-interface/ (Complete)
+
+**What:** One-time data migration that backs up all Expensify financial data to Cloudflare D1 (structured data) and R2 (receipt images) before account decommission.
+
+**Stack:** Bash scripts, Cloudflare Wrangler CLI, rclone, Expensify Integration API
+
+**Status:** Complete and audited as of 2026-01-18.
+
+**Results:**
+- 33 reports, 1,068 expenses, 1,063 receipt images backed up
+- All audit checks passed (report totals, receipt existence, spot checks)
+- D1 database: ~1.2 MB; R2 receipts: ~112 MB
+
+**Remaining (optional):**
+- Clean up BACKUP_UNREPORTED report in Expensify
+- Delete local export files
+- Decommission Expensify account
+
+---
+
+## Recent Session (2026-02-03)
+
+### Research: Google Recorder API
+
+Investigated whether Google Recorder (Pixel app) has an API or triggers for when recordings complete.
+
+**Findings:**
+- No public API or SDK
+- No broadcast intents for third-party apps to listen to
+- Files stored in protected `/data/data/com.google.android.apps.recorder/` (requires root)
+- No webhook support at recorder.google.com
+- Recordings sync to Google Account but no programmatic access
+
+**Workaround options considered:**
+1. ContentObserver on MediaStore (limited - Recorder uses private storage)
+2. Google Drive sync + Drive API polling (viable but indirect)
+3. Build custom recorder (chosen - gives full lifecycle control)
+
+**Decision:** Continue building custom recorder in `android-recorder/` since it provides direct control over recording completion events.
+
+---
+
+## Cross-cutting Themes
+
+- **Local-first with sync:** All components store data locally, then sync to cloud/remote when connectivity allows
+- **Metadata enrichment:** Audio gets GPS + calendar; calls get dual-channel separation; expenses get receipt images
+- **AI transcription pipeline:** Both audio components target Whisper for downstream transcription
+- **Cloud storage:** Google Drive (Android), Cloudflare R2 (Expensify), workstation rsync (Bluetooth device)
+
+## Git Status
+
+The repo root has deleted files from an earlier android/ directory (content moved to android-recorder/). The three active subdirectories are android-recorder/, bluetooth-device/, and expensify-interface/. The root also has a stale CLAUDE.md that was deleted from the index.
+
+## Next Steps
+
+1. **android-recorder:** Fix token expiration handling, restore 30-min chunk duration, clean up debug logging
+2. **bluetooth-device:** Begin implementation (systemd units, PipeWire config, BlueZ pairing scripts)
+3. **expensify-interface:** Optional cleanup (decommission Expensify account)
+4. **Root project:** Consider adding a top-level CLAUDE.md and cleaning up deleted files from git index

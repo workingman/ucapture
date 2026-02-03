@@ -1,0 +1,11 @@
+{"ts":"2026-02-03T15:30:00Z","type":"context","content":"uCapture Android audio recorder - Tasks 1-6 complete. App records audio with GPS/calendar metadata, uploads to Google Drive.","tags":["ucapture","android"]}
+{"ts":"2026-02-03T15:30:00Z","type":"decision","content":"Restored chunk duration to 30min default/5min minimum for production (was 1min for testing)","tags":["config","production"]}
+{"ts":"2026-02-03T15:35:00Z","type":"lesson","content":"Android foreground services must be started with startForegroundService() not just bindService(). BIND_AUTO_CREATE causes service destruction when last client unbinds, killing recordings on navigation.","tags":["android","service","critical"]}
+{"ts":"2026-02-03T15:35:00Z","type":"decision","content":"Recording controls now send intents to service instead of calling methods on bound service. This ensures commands survive navigation/unbind.","tags":["android","architecture"]}
+{"ts":"2026-02-03T15:40:00Z","type":"decision","content":"Pause now immediately finalizes current chunk (stops audio, persists to DB, queues upload). Resume starts fresh chunk in same session. Ensures no audio loss on pause.","tags":["recording","reliability"]}
+{"ts":"2026-02-03T15:45:00Z","type":"decision","content":"Stop recording creates final chunk if actively recording. If already paused, chunk was saved on pause so stop just cleans up.","tags":["recording","reliability"]}
+{"ts":"2026-02-03T15:45:00Z","type":"decision","content":"Record button now resumes when paused (in addition to starting new recording). Pause only via dedicated pause button.","tags":["ui","ux"]}
+{"ts":"2026-02-03T15:50:00Z","type":"todo","status":"open","content":"Clean up debug logging in GoogleDriveAuthManager","tags":["cleanup"]}
+{"ts":"2026-02-03T15:50:00Z","type":"todo","status":"open","content":"Fix test failures in SettingsViewModelTest (stale tests referencing removed methods)","tags":["testing"]}
+{"ts":"2026-02-03T15:50:00Z","type":"todo","status":"open","content":"Handle token expiration - access tokens expire after 1 hour, currently requires re-sign-in","tags":["auth","google-drive"]}
+{"ts":"2026-02-03T15:50:00Z","type":"todo","status":"done","content":"Restore chunk duration to 30min for production","tags":["config"]}

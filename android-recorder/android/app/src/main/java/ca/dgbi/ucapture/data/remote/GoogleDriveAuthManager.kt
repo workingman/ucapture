@@ -62,34 +62,24 @@ class GoogleDriveAuthManager @Inject constructor(
     /**
      * Check if user is currently signed in.
      */
-    suspend fun isSignedIn(): Boolean {
-        Log.d("GoogleDriveAuthManager", "isSignedIn: acquiring mutex")
-        return mutex.withLock {
-            Log.d("GoogleDriveAuthManager", "isSignedIn: mutex acquired")
-            // If in-memory state exists, return true
-            if (currentAccountEmail != null && accessToken != null && driveService != null) {
-                Log.d("GoogleDriveAuthManager", "isSignedIn: returning true (in-memory)")
-                return@withLock true
-            }
+    suspend fun isSignedIn(): Boolean = mutex.withLock {
+        // If in-memory state exists, return true
+        if (currentAccountEmail != null && accessToken != null && driveService != null) {
+            return@withLock true
+        }
 
         // Otherwise, try to restore from storage
         val storedToken = secureTokenStorage.getToken()
         val storedEmail = secureTokenStorage.getEmail()
 
         if (storedToken != null && storedEmail != null) {
-            Log.d("GoogleDriveAuthManager", "isSignedIn: restoring from storage")
-            // Restore in-memory state
             accessToken = storedToken
             currentAccountEmail = storedEmail
-            // Rebuild drive service - pass token directly to avoid mutex deadlock
             initializeDriveService(storedToken)
-            Log.d("GoogleDriveAuthManager", "isSignedIn: returning true (restored)")
             return@withLock true
         }
 
-        Log.d("GoogleDriveAuthManager", "isSignedIn: returning false")
         false
-        }
     }
 
     /**
@@ -102,7 +92,6 @@ class GoogleDriveAuthManager @Inject constructor(
      */
     suspend fun signIn(activityContext: Context): Boolean = withContext(Dispatchers.Main) {
         try {
-            Log.d("GoogleDriveAuthManager", "signIn: starting")
             // Step 1: Sign in with Google ID
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
@@ -120,52 +109,44 @@ class GoogleDriveAuthManager @Inject constructor(
             )
 
             val idSignInSuccessful = handleSignInResult(result)
-            Log.d("GoogleDriveAuthManager", "signIn: idSignInSuccessful=$idSignInSuccessful")
             if (!idSignInSuccessful) {
                 return@withContext false
             }
 
             // Step 2: Request Drive authorization
-            val authResult = requestDriveAuthorization(activityContext)
-            Log.d("GoogleDriveAuthManager", "signIn: authResult=$authResult")
-            authResult
+            requestDriveAuthorization(activityContext)
         } catch (e: GetCredentialException) {
-            Log.e("GoogleDriveAuthManager", "signIn: GetCredentialException", e)
+            Log.e("GoogleDriveAuthManager", "Sign-in failed", e)
             false
         } catch (e: Exception) {
-            Log.e("GoogleDriveAuthManager", "signIn: Exception", e)
+            Log.e("GoogleDriveAuthManager", "Sign-in failed", e)
             false
         }
     }
 
     private suspend fun handleSignInResult(response: GetCredentialResponse): Boolean {
-        Log.d("GoogleDriveAuthManager", "handleSignInResult: starting, credential type=${response.credential::class.simpleName}")
         val credential = response.credential
 
         return when (credential) {
             is CustomCredential -> {
-                Log.d("GoogleDriveAuthManager", "handleSignInResult: CustomCredential, type=${credential.type}")
                 if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     try {
                         val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                        Log.d("GoogleDriveAuthManager", "handleSignInResult: got email=${googleIdTokenCredential.id}, acquiring mutex")
                         mutex.withLock {
-                            Log.d("GoogleDriveAuthManager", "handleSignInResult: mutex acquired")
                             currentAccountEmail = googleIdTokenCredential.id
                         }
-                        Log.d("GoogleDriveAuthManager", "handleSignInResult: returning true")
                         true
                     } catch (e: Exception) {
-                        Log.e("GoogleDriveAuthManager", "handleSignInResult: failed to create credential", e)
+                        Log.e("GoogleDriveAuthManager", "Failed to parse credential", e)
                         false
                     }
                 } else {
-                    Log.d("GoogleDriveAuthManager", "handleSignInResult: unexpected credential type")
+                    Log.w("GoogleDriveAuthManager", "Unexpected credential type: ${credential.type}")
                     false
                 }
             }
             else -> {
-                Log.d("GoogleDriveAuthManager", "handleSignInResult: not a CustomCredential")
+                Log.w("GoogleDriveAuthManager", "Unexpected credential class: ${credential::class.simpleName}")
                 false
             }
         }
@@ -194,10 +175,7 @@ class GoogleDriveAuthManager @Inject constructor(
     }
 
     private suspend fun handleAuthorizationResult(result: AuthorizationResult, activityContext: Context): Boolean {
-        Log.d("GoogleDriveAuthManager", "handleAuthorizationResult: hasResolution=${result.hasResolution()}, accessToken=${result.accessToken != null}")
         if (result.hasResolution()) {
-            // User needs to grant permission - launch the consent UI
-            Log.d("GoogleDriveAuthManager", "Authorization needs resolution, launching consent")
             try {
                 val pendingIntent = result.pendingIntent
                 if (pendingIntent != null && activityContext is Activity) {
@@ -206,8 +184,6 @@ class GoogleDriveAuthManager @Inject constructor(
                         REQUEST_AUTHORIZE,
                         null, 0, 0, 0
                     )
-                    // Note: Result will come back to onActivityResult
-                    // For now, return false - user needs to sign in again after granting
                     return false
                 }
             } catch (e: Exception) {
@@ -218,16 +194,14 @@ class GoogleDriveAuthManager @Inject constructor(
 
         val token = result.accessToken
         if (token == null) {
-            Log.e("GoogleDriveAuthManager", "No access token in result")
+            Log.e("GoogleDriveAuthManager", "No access token in authorization result")
             return false
         }
 
-        Log.d("GoogleDriveAuthManager", "Got access token, initializing Drive service")
         mutex.withLock {
             accessToken = token
         }
 
-        // Persist token and email to secure storage
         secureTokenStorage.saveToken(token)
         val email = mutex.withLock { currentAccountEmail }
         if (email != null) {
@@ -235,35 +209,26 @@ class GoogleDriveAuthManager @Inject constructor(
         }
 
         initializeDriveService()
+        lastTokenRefreshMs.set(System.currentTimeMillis())
         return true
     }
 
     private suspend fun initializeDriveService(token: String? = null) = withContext(Dispatchers.IO) {
-        Log.d("GoogleDriveAuthManager", "initializeDriveService: starting")
-        val tokenToUse = token ?: accessToken ?: run {
-            Log.d("GoogleDriveAuthManager", "initializeDriveService: no token, returning")
-            return@withContext
-        }
+        val tokenToUse = token ?: accessToken ?: return@withContext
 
-        Log.d("GoogleDriveAuthManager", "initializeDriveService: building Drive service")
-        // Create a credential that uses the access token
         val credential = object : com.google.api.client.http.HttpRequestInitializer {
             override fun initialize(request: com.google.api.client.http.HttpRequest) {
                 request.headers.authorization = "Bearer $tokenToUse"
             }
         }
 
-        val service = Drive.Builder(
+        driveService = Drive.Builder(
             NetHttpTransport(),
             GsonFactory.getDefaultInstance(),
             credential
         )
             .setApplicationName("uCapture")
             .build()
-
-        Log.d("GoogleDriveAuthManager", "initializeDriveService: Drive service built, setting driveService")
-        driveService = service
-        Log.d("GoogleDriveAuthManager", "initializeDriveService: done")
     }
 
     /**
@@ -274,7 +239,6 @@ class GoogleDriveAuthManager @Inject constructor(
      */
     suspend fun refreshToken(): Boolean = withContext(Dispatchers.IO) {
         try {
-            Log.d("GoogleDriveAuthManager", "refreshToken: requesting fresh token")
             val authorizationRequest = AuthorizationRequest.builder()
                 .setRequestedScopes(listOf(Scope(DriveScopes.DRIVE_FILE)))
                 .build()
@@ -284,18 +248,16 @@ class GoogleDriveAuthManager @Inject constructor(
                 .await()
 
             if (authorizationResult.hasResolution()) {
-                // User needs to re-grant — can't do this silently
-                Log.w("GoogleDriveAuthManager", "refreshToken: needs resolution (user interaction required)")
+                Log.w("GoogleDriveAuthManager", "Token refresh needs user interaction")
                 return@withContext false
             }
 
             val token = authorizationResult.accessToken
             if (token == null) {
-                Log.e("GoogleDriveAuthManager", "refreshToken: no token in result")
+                Log.e("GoogleDriveAuthManager", "Token refresh returned no token")
                 return@withContext false
             }
 
-            Log.d("GoogleDriveAuthManager", "refreshToken: got fresh token")
             mutex.withLock {
                 accessToken = token
             }
@@ -304,7 +266,7 @@ class GoogleDriveAuthManager @Inject constructor(
             lastTokenRefreshMs.set(System.currentTimeMillis())
             true
         } catch (e: Exception) {
-            Log.e("GoogleDriveAuthManager", "refreshToken: failed", e)
+            Log.e("GoogleDriveAuthManager", "Token refresh failed", e)
             false
         }
     }
@@ -320,7 +282,6 @@ class GoogleDriveAuthManager @Inject constructor(
 
         val elapsed = System.currentTimeMillis() - lastTokenRefreshMs.get()
         if (lastTokenRefreshMs.get() == 0L || elapsed > TOKEN_REFRESH_INTERVAL_MS) {
-            Log.d("GoogleDriveAuthManager", "ensureFreshToken: token stale (${elapsed}ms), refreshing")
             return refreshToken()
         }
         return true

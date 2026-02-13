@@ -8,47 +8,101 @@ Android audio recording app with GPS/calendar metadata, Google Drive upload.
 **SDK:** min 29, target 35, compile 36
 
 ## Status
-| Task | Status |
-|------|--------|
-| 1.0 Project setup | Complete |
-| 2.0 Audio recording service | Complete |
-| 3.0 Metadata collection | Complete |
-| 4.0 Local storage (Room) | Complete |
-| 5.0 Google Drive integration | Complete |
-| 6.0 UI | Complete |
+| Task | Status | Notes |
+|------|--------|-------|
+| 1.0 Project setup | Complete (8/9) | ProGuard rules remaining |
+| 2.0 Audio recording service | **Complete** | AAC/M4A (not MP3) |
+| 3.0 Metadata collection | Complete (13/14) | Adaptive sampling deferred |
+| 4.0 Local storage (Room) | Complete (15/18) | Storage monitoring not yet |
+| 5.0 Google Drive integration | Partial (19/20) | Upload progress notification remaining |
+| 6.0 UI | Partial (19/29) | Missing: audio playback, some settings |
+| 7.0 Permissions/errors | Partial (13/19) | Missing: PermissionManager, onboarding, error UX |
+| 8.0 Testing/docs | Partial (14/32) | 107 tests passing, needs instrumented + manual tests |
+| Token refresh & upload recovery | Complete | |
+| Debug logging cleanup | Complete | |
+| Task list & PRD audit | Complete | Updated 2026-02-07 |
 
 ## What's Working
 - Google Sign-In via Credential Manager
 - Token persistence (EncryptedSharedPreferences)
+- **Silent token refresh** (tokens auto-refresh before expiry, retry on 401)
 - Drive authorization and folder creation
 - Recording with chunking (30-min default, production settings)
 - Chunks upload to Drive with JSON metadata sidecars
 - Auto-retry: hourly periodic retry + immediate retry on sign-in
-- **Rock-solid recording that survives navigation**
-- **Pause immediately creates chunk (no lost audio)**
-- **Stop creates final chunk before ending**
+- **Pending uploads flush on app startup** (not just on sign-in)
+- **HTTP error classification** (401→NotAuthenticated, 403 quota→QuotaExceeded, 404→NoTargetFolder)
+- Rock-solid recording that survives navigation
+- Pause immediately creates chunk (no lost audio)
+- Stop creates final chunk before ending
+- All 107 unit tests passing
 
-## Key Changes This Session (2026-02-03)
+## Key Changes This Session (2026-02-07)
 
-### Recording Reliability Overhaul
-1. **Service lifecycle fix** - Recording now uses `startForegroundService()` instead of just `bindService()`. This ensures the service survives when user navigates to Timeline/Settings.
+### Project Audit & Documentation
+1. **Task list updated** - `tasks/tasks-0001-prd-audio-recording-app.md` fully audited against codebase. ~120 subtasks checked off, PRD deviations documented (AAC vs MP3, JSON sidecar vs ID3, CredentialManager vs Google Sign-In, EncryptedSharedPrefs vs Keystore).
+2. **ARCHITECTURE.md updated** - Removed stale "pending" labels, updated file tree, replaced "What's Next" with accurate "Status" section.
+3. **PRD mindmap created** - `docs/prd-overview.mmd` (+ .svg, .png) — Mermaid mindmap covering all PRD sections: system overview, goals, user stories, FRs, tech stack, decisions, metrics, future enhancements. Rendered via `@mermaid-js/mermaid-cli`.
+4. **session.mmd reviewed** - Existing runtime architecture diagram confirmed as good session memory; PRD mindmap complements it as a static reference.
 
-2. **Pause creates chunk immediately** - When paused, audio is stopped and saved as a completed chunk. Resume starts a fresh chunk in the same session.
+### Upload Recovery Fix (earlier this session)
+1. **Token refresh** - `GoogleDriveAuthManager.refreshToken()` silently calls `AuthorizationClient.authorize()` to get a fresh token without UI (scope already granted).
+2. **Proactive refresh** - `ensureFreshToken()` refreshes if token is older than 45 minutes (they expire at 60). Called before every upload and verify.
+3. **Retry on auth error** - `GoogleDriveStorage.upload()` catches auth errors, refreshes token, and retries once automatically.
+4. **HTTP error classification** - New `classifyHttpError()` parses `GoogleJsonResponseException` status codes instead of treating all errors as generic retries.
+5. **Pending uploads on startup** - `UCaptureApplication.onCreate()` now calls `schedulePendingUploads()` so stuck PENDING recordings get re-enqueued every app launch.
 
-3. **Stop creates final chunk** - If actively recording, stop finalizes the current chunk before ending. If paused, chunk was already saved.
-
-4. **Record button resumes** - Tapping the big red button when paused will resume (no need to find the small resume button).
-
-5. **Chunk duration restored** - 30-min default, 5-min minimum (was 1-min for testing).
+### Cleanup
+6. **Debug logging removed** - ~20 verbose `Log.d` calls removed from `GoogleDriveAuthManager` (mutex acquisition, step-by-step progress). Only error/warning logs remain.
+7. **Tests fixed** - `SettingsViewModelTest` updated for 3-param constructor and `getTargetFolderName()`. `GoogleDriveStorageTest` and `UploadWorkerTest` fixed with test dispatchers and `ensureFreshToken()` mocks. Added `unitTests.isReturnDefaultValues = true` to build.gradle.kts.
 
 ## Key Files Modified This Session
 ```
-service/RecordingService.kt       # Pause creates chunk, stop creates chunk
-service/ChunkManager.kt           # endCurrentChunkForPause(), startNewChunkForResume()
-ui/recording/RecordingScreen.kt   # startForegroundService, intent-based controls, record resumes
+# Upload recovery & cleanup (earlier)
+data/remote/GoogleDriveAuthManager.kt   # refreshToken(), ensureFreshToken(), logging cleanup
+data/remote/GoogleDriveStorage.kt       # executeUpload(), classifyHttpError(), retry on auth error
+data/remote/UploadWorker.kt             # Diagnostic logging
+data/remote/RetryFailedUploadsWorker.kt # Diagnostic logging
+UCaptureApplication.kt                  # schedulePendingUploads on startup
+app/build.gradle.kts                    # unitTests.isReturnDefaultValues
+test/.../SettingsViewModelTest.kt       # Fixed for current API
+test/.../GoogleDriveStorageTest.kt      # Test dispatchers, ensureFreshToken mock
+test/.../UploadWorkerTest.kt            # Test dispatchers
+
+# Project audit & docs (later)
+tasks/tasks-0001-prd-audio-recording-app.md  # Full status audit, PRD deviations
+docs/ARCHITECTURE.md                         # Updated status, file tree
+docs/prd-overview.mmd                        # New PRD mindmap
+docs/prd-overview.svg                        # Rendered SVG
+docs/prd-overview.png                        # Rendered PNG
 ```
 
 ## Architecture Notes
+
+### Token Lifecycle
+```
+Sign-In → accessToken stored + lastTokenRefreshMs set
+  ↓
+Upload requested → ensureFreshToken()
+  ├→ Token < 45 min old → use as-is
+  └→ Token stale → refreshToken() via AuthorizationClient.authorize()
+      ├→ Success → new token, rebuild Drive service
+      └→ Needs resolution → return false (user must re-sign-in)
+  ↓
+Upload fails with 401 → refreshToken() + retry once
+```
+
+### Upload Error Classification
+```
+GoogleJsonResponseException
+  ├→ 401 → NotAuthenticated (refresh token + retry)
+  ├→ 403 quota reasons → QuotaExceeded (permanent failure)
+  ├→ 403 other → NotAuthenticated (re-auth may help)
+  ├→ 404 → NoTargetFolder (folder deleted)
+  └→ other → ApiError(code, message)
+IOException → NetworkError (transient, retry)
+Exception → ApiError(0, message) (transient, retry)
+```
 
 ### Service Binding vs Starting
 - `bindService()` with `BIND_AUTO_CREATE` creates service but destroys it when last client unbinds
@@ -67,21 +121,44 @@ Stop → Chunk 2 finalized (if recording) or cleanup (if paused)
 ```
 
 ## Next Steps
-1. **Clean up debug logging** - Remove verbose mutex/auth logs from GoogleDriveAuthManager
-2. **Fix test failures** - SettingsViewModelTest has stale tests referencing removed methods
-3. **Handle token expiration** - Access tokens expire after 1 hour (currently requires re-sign-in)
+
+### Remaining MVP Work (by priority)
+1. **RetentionManager fix** — Uploaded files (0.9GB) never get deleted from disk. Files from Feb 3 still present 5 days later. Investigate `RetentionManager` / post-upload cleanup logic. (Discovered 2026-02-08 via ADB after phone reboot; reboot itself was not caused by the app.)
+2. **Audio playback** (6.16-6.19) — `AudioPlayer.kt`, play/pause/seek, timeline scrubbing, progress indicator
+2. **Settings completeness** (6.22-6.25, 6.27) — audio quality picker, retention period, max storage, low storage threshold, storage stats display
+3. **Storage monitoring** (4.10-4.12) — available/used space calculation, low-space warnings
+4. **Permission onboarding** (7.1, 7.9) — `PermissionManager.kt`, first-launch flow
+5. **Error UX** (7.12, 7.13, 7.16) — storage full handling, mic-in-use handling, user-facing error notifications
+
+### Nice-to-Have
+- Upload progress UI (5.15)
+- Crash reporting (7.19)
+- More unit tests (RecordingRepository, MetadataRepository, HashUtil, RetentionManager)
+- Instrumented tests (AppDatabase, RecordingService, upload verification)
+- Manual test passes (battery, DST, retention, error scenarios)
+- Documentation (README, KDoc, privacy considerations)
+
+### Reference Diagrams
+- `session.mmd` — runtime architecture (components, data flow, connections)
+- `docs/prd-overview.mmd` — PRD mindmap (goals, stories, requirements, tech, decisions)
+- `docs/ARCHITECTURE.md` — written architecture guide with ASCII diagrams
 
 ## Commands
 ```bash
 cd /Users/gwr/Documents/dev/ubiq-capture/android-recorder/android
 ./gradlew build
+./gradlew assembleDebug        # Skip test compile (avoids WorkManager KTX dupe)
 ./gradlew installDebug
-adb -s 49180DLAQ003R6 logcat -d | grep -iE "ucapture|upload|drive"
+./gradlew testDebugUnitTest    # Run all 107 unit tests
+adb -s 49180DLAQ003R6 logcat -s UploadWorker GoogleDriveAuthManager GoogleDriveStorage RetryFailedUploads
 ```
+
+## Known Issues
+- `./gradlew build` fails at `bundleDebugClassesToRuntimeJar` due to WorkManager KTX duplicate class. Use `assembleDebug` or `testDebugUnitTest` separately. The KTX artifact is redundant in newer WorkManager versions.
 
 ## Device
 - Pixel 9 (Android 16) - serial: 49180DLAQ003R6
 
 ---
 **Created:** 2025-12-13
-**Updated:** 2026-02-03
+**Updated:** 2026-02-08

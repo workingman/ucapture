@@ -4,8 +4,10 @@
 # IDE
 .idea/
 
-# Claude Code session exports
+# Claude Code session exports and state files
 claude-sessions/
+**/.claude
+!/.claude/
 
 # Agent temp scripts
 .tmp/

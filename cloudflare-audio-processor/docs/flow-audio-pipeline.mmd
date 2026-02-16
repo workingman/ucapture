@@ -1,0 +1,46 @@
+sequenceDiagram
+    participant Phone as Phone (uCapture)
+    participant CF as Cloudflare Worker
+    participant R2 as Cloudflare R2
+    participant D1 as Cloudflare D1
+    participant Q as Queue (CF Queue)
+    participant GCP as GCP Cloud Run
+    participant SM as Speechmatics API
+    participant DS as Downstream (event)
+
+    Note over Phone,CF: Upload Phase
+    Phone->>CF: POST /upload (audio + metadata + images + notes)
+    CF->>CF: Validate auth & payload
+    CF->>R2: Store raw artifacts ({user}/{batch}/{type}/...)
+    CF->>D1: Create batch record (status: uploaded)
+    CF->>Q: Enqueue processing job (batch_id, priority)
+    CF-->>Phone: 202 Accepted {batch_id}
+
+    Note over Q,GCP: Processing Phase
+    Q->>GCP: Deliver job (batch_id)
+    GCP->>D1: Update status → processing
+    GCP->>R2: Fetch raw audio
+    GCP->>GCP: Transcode M4A → 16kHz mono PCM
+
+    rect rgb(240, 248, 255)
+        Note over GCP: Audio Processing Pipeline
+        GCP->>GCP: Cobra VAD → identify speech segments
+        GCP->>GCP: Koala → denoise speech segments
+    end
+
+    alt Speech detected
+        GCP->>SM: Submit cleaned audio (Batch API)
+        SM-->>GCP: Transcript (word timestamps + confidence)
+        GCP->>R2: Store cleaned audio
+        GCP->>R2: Store transcript JSON
+        GCP->>D1: Update batch (status: completed, artifact paths)
+        GCP->>DS: Emit completion event (batch_id, user_id, paths)
+    else No speech detected
+        GCP->>D1: Update batch (status: completed, empty transcript)
+        GCP->>DS: Emit completion event (no speech)
+    end
+
+    Note over Phone,CF: Status Query (optional)
+    Phone->>CF: GET /status/{batch_id}
+    CF->>D1: Query batch record
+    CF-->>Phone: {status, artifacts[]}

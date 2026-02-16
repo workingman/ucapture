@@ -13,6 +13,9 @@ claude-sessions/
 # Swap files
 *.swp
 
+# Wrangler local dev state
+.wrangler/
+
 # Node
 node_modules/
 

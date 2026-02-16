@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+
+# IDE
+.idea/
+
+# Claude Code session exports
+claude-sessions/
+
+# Agent temp scripts
+.tmp/
+
+# Swap files
+*.swp
+
+# Node
+node_modules/
+
+# Expensify local data
+export/
+receipts_*.pdf
+
+# Build outputs
+*.apk
+*.aab
+build/
+.gradle/
+local.properties

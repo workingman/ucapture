@@ -51,18 +51,19 @@ uCapture is an Android audio recording app that captures audio with contextual m
 
 ## Layer Responsibilities
 
-### UI Layer (Task 6.0 - Pending)
-- **Screens**: Jetpack Compose UI components
+### UI Layer (Task 6.0 - Core Complete)
+- **Screens**: Jetpack Compose UI — Recording, Timeline, Settings
 - **ViewModels**: Hold UI state via `StateFlow`, handle user actions
 - **Navigation**: Compose Navigation for screen transitions
+- **Remaining**: Audio playback (6.16-6.19), some settings UI (quality, retention, storage)
 
 ### Service Layer (Tasks 2.0, 3.0 - Complete)
 The heart of the app. Runs as a **foreground service** so recording continues when the app is backgrounded or the screen is off.
 
-### Data Layer (Tasks 4.0, 5.0 - Pending)
+### Data Layer (Tasks 4.0, 5.0 - Complete)
 - **Room**: Local SQLite database for recordings and metadata
 - **File Storage**: Audio files stored in app's private storage
-- **Cloud**: Google Drive upload via WorkManager for reliability
+- **Cloud**: Google Drive upload via WorkManager with silent token refresh and error classification
 
 ## Key Components
 
@@ -205,14 +206,17 @@ app/src/main/java/ca/dgbi/ucapture/
 │       └── CalendarMetadataCollector.kt # Calendar implementation
 ├── util/
 │   └── PowerUtils.kt           # Battery optimization helpers
-├── data/                       # (Task 4.0 - pending)
-│   ├── local/                  # Room database
-│   ├── repository/             # Data repositories
-│   └── remote/                 # Google Drive
-└── ui/                         # (Task 6.0 - pending)
-    ├── recording/
-    ├── timeline/
-    └── settings/
+├── data/
+│   ├── local/                  # Room database (entities, DAOs, converters)
+│   ├── model/                  # RecordingMetadata (JSON export)
+│   ├── repository/             # RecordingRepository, MetadataRepository
+│   └── remote/                 # GoogleDriveStorage, UploadWorker, SecureTokenStorage
+└── ui/
+    ├── navigation/             # AppNavigation (NavHost)
+    ├── recording/              # RecordingScreen + ViewModel
+    ├── settings/               # SettingsScreen + ViewModel (Drive auth)
+    ├── theme/                  # Material 3 theme (Color, Theme, Type)
+    └── timeline/               # TimelineScreen + ViewModel + TimelineItem
 ```
 
 ## Threading Model
@@ -234,10 +238,13 @@ app/src/main/java/ca/dgbi/ucapture/
 | POST_NOTIFICATIONS | Status notification (Android 13+) | Yes |
 | INTERNET | Google Drive upload | Yes |
 
-## What's Next
+## Status
 
-- **Task 4.0**: Room database for persisting recordings and metadata
-- **Task 5.0**: Google Drive integration with WorkManager
-- **Task 6.0**: Compose UI for recording controls, timeline, settings
-- **Task 7.0**: Permission management and error handling
-- **Task 8.0**: Testing and documentation
+Tasks 1-6 are substantially complete (107 unit tests passing). Key remaining work:
+
+- **Audio playback**: `AudioPlayer.kt` for timeline replay (6.16-6.19)
+- **Settings completeness**: Quality, retention, storage limit, storage stats UI (6.22-6.25, 6.27)
+- **Storage monitoring**: Available/used space calculation, low-space warnings (4.10-4.12)
+- **Permission onboarding**: First-launch flow, `PermissionManager.kt` (7.1, 7.9)
+- **Error UX**: User-facing error messages and notifications (7.12, 7.13, 7.16)
+- **Testing**: Instrumented tests, additional manual testing, documentation (8.x)

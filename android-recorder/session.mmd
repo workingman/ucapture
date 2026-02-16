@@ -1,0 +1,149 @@
+%%{ init: { 'theme': 'base', 'themeVariables': { 'fontSize': '14px' } } }%%
+graph TB
+    subgraph App["UCaptureApplication"]
+        AppStart["onCreate()"]
+        AppStart --> SetupRetry["setupPeriodicRetry()"]
+        AppStart --> FlushPending["schedulePendingUploads()"]
+    end
+
+    subgraph UI["UI Layer · Jetpack Compose"]
+        RecScreen["RecordingScreen"]
+        SettingsScreen["SettingsScreen"]
+        TimelineScreen["TimelineScreen"]
+        NavGraph["AppNavigation"]
+
+        NavGraph --> RecScreen
+        NavGraph --> SettingsScreen
+        NavGraph --> TimelineScreen
+    end
+
+    subgraph ViewModels["ViewModels"]
+        RecVM["RecordingViewModel"]
+        SettingsVM["SettingsViewModel"]
+        TimelineVM["TimelineViewModel"]
+
+        RecScreen --> RecVM
+        SettingsScreen --> SettingsVM
+        TimelineScreen --> TimelineVM
+    end
+
+    subgraph Service["Recording Service Layer"]
+        RecService["RecordingService\n(Foreground Service)"]
+        AudioRec["AudioRecorder\n(AAC/M4A)"]
+        ChunkMgr["ChunkManager\n(30-min chunks)"]
+
+        RecVM -->|"start/stop/pause\n(intents)"| RecService
+        RecService --> AudioRec
+        RecService --> ChunkMgr
+    end
+
+    subgraph Metadata["Metadata Collectors"]
+        MetaInterface["MetadataCollector&lt;T&gt;"]
+        LocationMeta["LocationMetadataCollector\n(GPS samples)"]
+        CalendarMeta["CalendarMetadataCollector\n(calendar events)"]
+
+        MetaInterface -.-> LocationMeta
+        MetaInterface -.-> CalendarMeta
+        RecService --> LocationMeta
+        RecService --> CalendarMeta
+    end
+
+    subgraph Storage["Local Storage · Room"]
+        AppDB["AppDatabase"]
+        RecDao["RecordingDao"]
+        LocDao["LocationSampleDao"]
+        CalDao["CalendarEventDao"]
+        RecEntity["RecordingEntity\n(PENDING→UPLOADING→UPLOADED/FAILED)"]
+        LocEntity["LocationSampleEntity"]
+        CalEntity["CalendarEventEntity"]
+
+        AppDB --> RecDao
+        AppDB --> LocDao
+        AppDB --> CalDao
+        RecDao --> RecEntity
+        LocDao --> LocEntity
+        CalDao --> CalEntity
+    end
+
+    subgraph Repos["Repositories"]
+        RecRepo["RecordingRepository"]
+        MetaRepo["MetadataRepository"]
+
+        RecRepo --> RecDao
+        MetaRepo --> LocDao
+        MetaRepo --> CalDao
+    end
+
+    subgraph Upload["Upload Pipeline"]
+        UploadSched["UploadScheduler"]
+        UploadWorker["UploadWorker\n(WorkManager)"]
+        RetryWorker["RetryFailedUploadsWorker\n(hourly)"]
+
+        UploadSched -->|"enqueue"| UploadWorker
+        SetupRetry --> RetryWorker
+        FlushPending --> UploadSched
+        RetryWorker -->|"FAILED→PENDING\nre-enqueue"| UploadWorker
+    end
+
+    subgraph Drive["Google Drive Integration"]
+        CloudInterface["CloudStorageProvider"]
+        GDStorage["GoogleDriveStorage"]
+        GDAuth["GoogleDriveAuthManager"]
+        TokenStore["SecureTokenStorage\n(EncryptedSharedPrefs)"]
+        DriveAPI["Google Drive API v3"]
+
+        CloudInterface -.-> GDStorage
+        GDStorage --> GDAuth
+        GDAuth --> TokenStore
+        GDStorage --> DriveAPI
+    end
+
+    subgraph Auth["Token Lifecycle"]
+        SignIn["signIn()\n(CredentialManager)"]
+        Refresh["refreshToken()\n(AuthorizationClient)"]
+        EnsureFresh["ensureFreshToken()\n(45-min threshold)"]
+
+        SignIn -->|"initial"| GDAuth
+        EnsureFresh -->|"if stale"| Refresh
+        Refresh -->|"silent"| GDAuth
+    end
+
+    subgraph ErrorClass["Error Classification"]
+        HTTP401["401 → NotAuthenticated"]
+        HTTP403Q["403 quota → QuotaExceeded"]
+        HTTP404["404 → NoTargetFolder"]
+        IOErr["IOException → NetworkError"]
+    end
+
+    subgraph DI["Dependency Injection · Hilt"]
+        AppModule["AppModule\n(singletons)"]
+        DBModule["DatabaseModule"]
+        NetModule["NetworkModule"]
+    end
+
+    %% Cross-layer connections
+    ChunkMgr -->|"CompletedChunk"| RecRepo
+    RecService --> MetaRepo
+    UploadWorker --> RecRepo
+    UploadWorker --> GDStorage
+    UploadWorker -->|"prepareMetadataSidecar"| FileManager["FileManager"]
+    UploadWorker -->|"MD5 verify"| HashUtil["HashUtil"]
+    SettingsVM --> GDAuth
+    SettingsVM --> GDStorage
+    SettingsVM -->|"on sign-in"| UploadSched
+    GDStorage -->|"before upload"| EnsureFresh
+    GDStorage -->|"on 401"| Refresh
+    UploadWorker -->|"error"| ErrorClass
+
+    %% Styling
+    classDef service fill:#e1f5fe,stroke:#0288d1
+    classDef storage fill:#e8f5e9,stroke:#388e3c
+    classDef upload fill:#fff3e0,stroke:#f57c00
+    classDef auth fill:#fce4ec,stroke:#c62828
+    classDef ui fill:#f3e5f5,stroke:#7b1fa2
+
+    class RecService,AudioRec,ChunkMgr service
+    class AppDB,RecDao,LocDao,CalDao,RecEntity,LocEntity,CalEntity storage
+    class UploadSched,UploadWorker,RetryWorker upload
+    class GDAuth,TokenStore,SignIn,Refresh,EnsureFresh auth
+    class RecScreen,SettingsScreen,TimelineScreen,NavGraph ui

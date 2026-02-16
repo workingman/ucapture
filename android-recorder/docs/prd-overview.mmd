@@ -1,0 +1,107 @@
+mindmap
+  root((uCapture PRD))
+    **Three-Part System**
+      Part 1: Android App ← This PRD
+        audio + metadata via Google Drive
+      Part 2: Backend Processing
+        Transcription & metadata generation
+      Part 3: Web Frontend
+        Recordings & derived data access
+    **Project Goals**
+      G1: Continuous reliable background recording
+      G2: Auto storage mgmt — upload, verify, delete
+      G3: Configurable audio quality
+      G4: Chunked recordings for efficient upload
+      G5: Rich contextual metadata — GPS, calendar
+      G6: Future GCS migration path
+      G7: Graceful error handling
+    **User Stories**
+      US-1: One-tap record
+      US-2: Auto-chunking
+      US-3: Drive folder config
+      US-4: Quality settings
+      US-5: Auto-delete after upload
+      US-6: Timeline replay with timestamps
+      US-7: Pause/resume
+      US-8: Error notifications
+      US-9: Auto GPS capture
+      US-10: Auto calendar linking
+    **Functional Requirements**
+      Core Recording 4.1
+        FR-1: Permissions — mic, location, calendar, foreground, notification, battery
+        FR-2: Start / Pause / Resume / Stop
+        FR-3: 24+ hour continuous — screen off, locked
+        FR-4: Auto-chunking — 30-60 min default
+        FR-5: AAC/M4A medium quality default
+        FR-6: Local temp storage
+        FR-7: Filename — ucap-YYYYMMDD-HHMMSS-TZ-NNN
+      Settings 4.2
+        FR-8: Quality 64/128/256, GPS interval, retention, storage limit, Drive folder
+        FR-9: Drive folder selection
+        FR-10: Persist settings across restarts
+      Upload and Sync 4.3
+        FR-11: Google Drive OAuth 2.0
+        FR-12: Auto-upload completed chunks
+        FR-13: MD5 hash verification
+        FR-14: Delete after verify + retention
+        FR-15: Queue offline, retry on connectivity
+        FR-16: Background upload — WorkManager
+        FR-17: Retry with exponential backoff
+      User Interface 4.4
+        FR-18: Recording status display
+        FR-19: Duration + est. file size
+        FR-20: Timeline — scrolling, timestamps, future transcripts
+        FR-21: Audio playback — tap, scrub, play/pause
+        FR-22: Error messages and notifications
+      Storage Mgmt 4.5
+        FR-23: Low storage warning — 500MB default
+        FR-24: Stop recording if insufficient space
+        FR-25: Show app storage usage
+      Error Handling 4.6
+        FR-26: No internet → queue uploads
+        FR-27: Storage full → stop + notify
+        FR-28: Mic denied → show instructions
+        FR-29: Upload fail → retry + notify
+        FR-30: Auth fail → re-authenticate
+        FR-30a: Location denied → record without GPS
+        FR-30b: Calendar denied → record without events
+        FR-30c: Battery restricted → prompt exemption
+      Metadata 4.7-4.8
+        FR-31: JSON metadata for backend
+        FR-32: Rich metadata — UUID, timestamps, duration, MD5, GPS samples, calendar events
+        FR-33: Storage abstraction — CloudStorageProvider
+        FR-34-43: Location and calendar collection — 1-min GPS, Fused Provider, calendar overlap
+    **Technical Stack**
+      SDK: min 29 / target 35 / compile 36
+      Kotlin + Coroutines
+      MVVM + Repository + Hilt
+      Jetpack Compose + Material 3
+      Room — SQLite
+      WorkManager + Foreground Service
+      MediaRecorder → AAC/M4A — 44.1kHz mono
+      Google Drive API v3 → future GCS
+      CredentialManager + AuthorizationClient
+      EncryptedSharedPrefs, anonymized device ID
+    **Key Decisions**
+      D-1: 30-min chunks — future meeting-aware
+      D-2: Pause/resume in MVP
+      D-3: Upload after chunk complete
+      D-5: AAC not MP3 — Android limitation
+      D-7: TZ in filename + full TZ in metadata
+      D-9: 1-min GPS — future adaptive
+      D-12: JSON sidecar — not ID3 tags
+    **Success Metrics**
+      99%+ recording reliability
+      95%+ upload success within 24h
+      100% MD5 verify before delete
+      Less than 15% battery over 8 hours
+      First record+upload in under 5 minutes
+      90%+ GPS capture rate
+      95%+ calendar accuracy
+    **Future Enhancements**
+      Smart recording detection
+      Quick voice notes
+      Geofencing
+      Calendar filtering
+      Metadata redaction
+      On-device Whisper transcription

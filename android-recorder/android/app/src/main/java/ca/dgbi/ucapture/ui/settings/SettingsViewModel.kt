@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ca.dgbi.ucapture.data.remote.GoogleDriveAuthManager
 import ca.dgbi.ucapture.data.remote.GoogleDriveStorage
+import ca.dgbi.ucapture.data.remote.UploadScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,14 +22,17 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val authManager: GoogleDriveAuthManager,
-    private val storage: GoogleDriveStorage
+    private val storage: GoogleDriveStorage,
+    private val uploadScheduler: UploadScheduler
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
-        refreshAuthState()
+        viewModelScope.launch {
+            refreshAuthState()
+        }
     }
 
     /**
@@ -42,6 +46,8 @@ class SettingsViewModel @Inject constructor(
             val success = authManager.signIn(activityContext)
             if (success) {
                 refreshAuthState()
+                uploadScheduler.retryFailedUploads(viewModelScope)
+                uploadScheduler.schedulePendingUploads(viewModelScope)
             } else {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -93,20 +99,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun refreshAuthState() {
-        viewModelScope.launch {
-            val isSignedIn = authManager.isSignedIn()
-            val email = if (isSignedIn) authManager.getCurrentAccountEmail() else null
-            val currentFolderName = storage.getTargetFolderName()
+    private suspend fun refreshAuthState() {
+        val isSignedIn = authManager.isSignedIn()
+        val email = if (isSignedIn) authManager.getCurrentAccountEmail() else null
+        val currentFolderName = storage.getTargetFolderName()
 
-            _uiState.update {
-                it.copy(
-                    isSignedIn = isSignedIn,
-                    userEmail = email,
-                    currentFolderName = currentFolderName,
-                    isLoading = false
-                )
-            }
+        _uiState.update {
+            it.copy(
+                isSignedIn = isSignedIn,
+                userEmail = email,
+                currentFolderName = currentFolderName,
+                isLoading = false
+            )
         }
     }
 }

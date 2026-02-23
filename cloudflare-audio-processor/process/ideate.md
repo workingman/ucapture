@@ -599,8 +599,13 @@ docs/
 ### Tools
 
 **Diagrams:**
-- Mermaid (`.mmd` files in `docs/diagrams/`, rendered in markdown)
-- Excalidraw (for hand-drawn style)
+- **Mermaid (PREFERRED)**: Create external `.mmd` files in `docs/` directory
+  - **Naming**: `prd-[feature-name]-figure[N].mmd` or `tdd-[feature-name]-figure[N].mmd`
+  - **File format**: ONLY valid Mermaid syntax (NO markdown code fences ` ``` `, NO ` ```mermaid `)
+  - **Start directly with**: `graph TB`, `sequenceDiagram`, `flowchart LR`, etc.
+  - **Reference in PRD/TDD** with descriptive sentence
+  - **Rationale**: LLM-parseable for future sessions, works with Mermaid viewers
+- Excalidraw (for hand-drawn style, export to SVG/PNG)
 
 **UI Mockups:**
 - Figma (export to PNG/SVG)

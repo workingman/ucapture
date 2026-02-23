@@ -94,8 +94,18 @@ Describe the system in terms of **components** and **boundaries**:
 For multi-component systems, identify which components live in which process,
 service, or deployment unit.
 
-If helpful, create architecture diagrams using Mermaid (preferred diagramming tool).
-Save as `docs/arch-[feature-name].mmd` or inline as markdown Mermaid blocks.
+**Architecture Diagrams:**
+- **ALWAYS create architecture diagrams as external Mermaid files** (`.mmd`) in the `docs/` directory
+- **Naming convention**: `docs/tdd-[feature-name]-figure[N].mmd` where N = 1, 2, 3, etc.
+- **File format**: `.mmd` files must contain **ONLY valid Mermaid syntax**
+  - ❌ **DO NOT** include markdown code fences (` ``` ` or ` ```mermaid `)
+  - ❌ **DO NOT** include any markdown formatting
+  - ✅ **DO** start directly with Mermaid diagram type (`graph`, `sequenceDiagram`, `flowchart`, `C4Context`, etc.)
+  - ✅ **Example**: File starts with `graph TB` or `flowchart LR`, not with ` ```mermaid `
+- **Reference in TDD**: Link to the diagram file with a descriptive sentence
+- **Rationale**: External Mermaid files are parseable by LLMs in future sessions and Mermaid viewers. The `tdd-` prefix clearly indicates which document the diagram belongs to.
+- **Example reference in TDD**: `See companion architecture diagram: [tdd-audio-pipeline-figure1.mmd](tdd-audio-pipeline-figure1.mmd)`
+- **Multiple diagrams**: Number them sequentially: `figure1`, `figure2`, `figure3`, etc.
 
 ### 3. Data Models
 

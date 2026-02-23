@@ -31,9 +31,9 @@ graph TB
     EmotionAPI["Emotion API<br/>(configurable provider)<br/>Default: Google Cloud NL<br/>Alt: Hume AI, self-hosted"]
 
     %% Android to Worker
-    Android -->|HTTPS POST /v1/upload| AuthMiddleware
-    Android -->|HTTPS GET /v1/status| AuthMiddleware
-    Android -.->|MQTT subscribe<br/>batch-completions/{user_id}| PubSub
+    Android -->|"HTTPS POST /v1/upload"| AuthMiddleware
+    Android -->|"HTTPS GET /v1/status"| AuthMiddleware
+    Android -.->|"MQTT subscribe<br/>batch-completions/{user_id}"| PubSub
 
     %% Worker internal flow
     AuthMiddleware --> UploadHandler
@@ -45,22 +45,22 @@ graph TB
     EventPublisher --> PubSub
 
     %% Queue to GCP
-    Queue -->|consume job| QueueConsumer
+    Queue -->|"consume job"| QueueConsumer
 
     %% GCP processing flow
     QueueConsumer --> AudioPipeline
-    AudioPipeline -->|fetch raw audio| R2
-    AudioPipeline -->|submit cleaned audio| Speechmatics
-    Speechmatics -->|transcript + diarization| AudioPipeline
-    AudioPipeline -->|analyze transcript segments<br/>(best-effort)| EmotionAPI
-    EmotionAPI -->|provider-tagged emotion JSON| AudioPipeline
+    AudioPipeline -->|"fetch raw audio"| R2
+    AudioPipeline -->|"submit cleaned audio"| Speechmatics
+    Speechmatics -->|"transcript + diarization"| AudioPipeline
+    AudioPipeline -->|"analyze transcript segments<br/>(best-effort)"| EmotionAPI
+    EmotionAPI -->|"provider-tagged emotion JSON"| AudioPipeline
     AudioPipeline --> ResultWriter
-    ResultWriter -->|store cleaned audio<br/>+ transcript + emotion.json| R2
-    ResultWriter -->|update status<br/>+ metrics| D1
-    ResultWriter -->|trigger event via<br/>POST /internal/publish-event| EventPublisher
+    ResultWriter -->|"store cleaned audio<br/>+ transcript + emotion.json"| R2
+    ResultWriter -->|"update status<br/>+ metrics"| D1
+    ResultWriter -->|"trigger event via<br/>POST /internal/publish-event"| EventPublisher
 
     %% Event flow back to Android
-    PubSub -.->|completion event| AndroidMQTT
+    PubSub -.->|"completion event"| AndroidMQTT
 
     %% Styling
     classDef androidClass fill:#a8e6cf,stroke:#333,stroke-width:2px

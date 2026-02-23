@@ -1,5 +1,12 @@
 # Development Process — Overview Diagram
 
+> **Note on Diagram Naming Convention:**
+> This file contains an inline Mermaid diagram documenting the development process itself.
+> For **project-specific diagrams** (PRDs, TDDs), always create **external `.mmd` files** in `docs/`:
+> - PRD diagrams: `docs/prd-[feature-name]-figure[N].mmd`
+> - TDD diagrams: `docs/tdd-[feature-name]-figure[N].mmd`
+> - Reference them in the document with: `See companion diagram: [filename.mmd](filename.mmd)`
+
 ```mermaid
 flowchart TD
     START([Start]) --> IDEATE

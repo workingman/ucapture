@@ -54,4 +54,17 @@ Clearly state what this feature will *not* include.
 * *Invalid:* "Use React and Redux." (Leave this for the TDD).
 
 ### 6. Design & Visuals
-Describe the primary UI states or interaction flows. If diagrams are helpful, create them as separate Mermaid diagram files (`.mmd`) or inline markdown Mermaid blocks. Mermaid is the preferred diagramming tool for this process.
+Describe the primary UI states or interaction flows.
+
+**Diagrams:**
+- **ALWAYS create diagrams as external Mermaid files** (`.mmd`) in the `docs/` directory
+- **Naming convention**: `docs/prd-[feature-name]-figure[N].mmd` where N = 1, 2, 3, etc.
+- **File format**: `.mmd` files must contain **ONLY valid Mermaid syntax**
+  - ❌ **DO NOT** include markdown code fences (` ``` ` or ` ```mermaid `)
+  - ❌ **DO NOT** include any markdown formatting
+  - ✅ **DO** start directly with Mermaid diagram type (`graph`, `sequenceDiagram`, `flowchart`, etc.)
+  - ✅ **Example**: File starts with `graph TB` or `sequenceDiagram`, not with ` ```mermaid `
+- **Reference in PRD**: Link to the diagram file with a descriptive sentence
+- **Rationale**: External Mermaid files are parseable by LLMs in future sessions and Mermaid viewers. The `prd-` prefix clearly indicates which document the diagram belongs to.
+- **Example reference in PRD**: `See companion diagram: [prd-audio-pipeline-figure1.mmd](prd-audio-pipeline-figure1.mmd)`
+- **Multiple diagrams**: Number them sequentially: `figure1`, `figure2`, `figure3`, etc.

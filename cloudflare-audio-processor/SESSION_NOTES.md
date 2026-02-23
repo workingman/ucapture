@@ -416,9 +416,103 @@ Successfully created production-ready PRD and TDD for the ubiquitous audio captu
 
 The modular design supports future enhancements (swap ASR engines, add emotion providers) without breaking existing functionality. The DR-safe file naming and audio durability contract ensure data safety at scale.
 
-**Status**: Ready for open question resolution → GitHub issue generation → parallel agent execution
+**Status**: ~~Ready for open question resolution → GitHub issue generation~~ → parallel agent execution
 
 ---
 
 *Session completed: 2026-02-22*
-*Next session: Resolve open questions, then generate GitHub Issues*
+
+---
+
+## Session: 2026-02-23 — GitHub Issue Generation
+
+### Status
+✅ **Issue generation complete**: 8 parent issues + 35 sub-issues = 43 total
+✅ **All sub-issues linked** to parent issues via GitHub sub-issues API
+✅ **Dependencies documented** in each sub-issue body (GraphQL API unavailable)
+✅ **Self-validation** passed for all 8 parents (AC coverage, FR coverage, TDD coverage)
+
+---
+
+### Issues Created
+
+| Parent | Title | Sub-Issues | Count |
+|--------|-------|------------|-------|
+| #1 | Worker project scaffolding and data layer | #9, #10, #11, #12, #13 | 5 |
+| #2 | Authentication and upload endpoint | #27, #28, #29, #30, #31 | 5 |
+| #3 | Query endpoints (status, batches, download) | #14, #15, #16, #17 | 4 |
+| #4 | GCP service scaffolding and audio processing | #18, #19, #20, #21, #22 | 5 |
+| #5 | ASR integration with modular interface | #23, #24, #25, #26 | 4 |
+| #6 | Pluggable emotion analysis | #32, #33, #34 | 3 |
+| #7 | Queue orchestration, event delivery, and retry | #39, #40, #41, #42, #43 | 5 |
+| #8 | Observability and metrics | #35, #36, #37, #38 | 4 |
+
+### Cross-Parent Dependency Graph
+
+```
+#1 (Worker data layer) ──┬──→ #2 (Auth + Upload) ──→ #3 (Query endpoints)
+                          │
+#4 (GCP scaffold) ──→ #5 (ASR) ──→ #6 (Emotion)
+                          │              │              │
+                          └──────────────┴──────────────┴──→ #7 (Orchestration)
+                                                                     │
+                                                               #8 (Observability)
+```
+
+**Parallel tracks:** #1–#3 (Worker/TypeScript) and #4–#6 (GCP/Python) can be built
+independently, converging at #7 (orchestration).
+
+### Implementation Order (suggested)
+
+**Wave 1 — Foundation (parallel):**
+- #1 Worker scaffolding (#9→#10,#11,#12,#13)
+- #4 GCP scaffolding (#18→#19,#20→#21→#22)
+
+**Wave 2 — Core features (parallel after Wave 1):**
+- #2 Auth + upload (#27→#28→#29→#30→#31)
+- #5 ASR integration (#23→#24,#25→#26)
+
+**Wave 3 — Extensions (parallel after Wave 2):**
+- #3 Query endpoints (#14,#15,#16→#17)
+- #6 Emotion analysis (#32→#33→#34)
+
+**Wave 4 — Integration (after Waves 1–3):**
+- #7 Orchestration (#39,#40→#41→#42,#43)
+
+**Wave 5 — Polish (after Wave 4):**
+- #8 Observability (#35→#36→#37,#38)
+
+### Process Notes
+
+- **Issue creation process**: `process/create-issues.md` worked well with the
+  three-phase approach (plan → dependency analysis → create). Planning agents
+  produced thorough coverage maps. Execution agents created well-structured issues.
+- **Context management**: One planning agent per parent (8 parallel), then one
+  execution agent per parent (8 parallel, max 5 sub-issues each). Stayed within
+  the 5-sub-issue-per-invocation cap.
+- **GitHub dependency API**: The `addIssueDependency` GraphQL mutation requires
+  GitHub Enterprise. Not available on free/Team plans. Dependencies documented
+  in issue bodies instead — adequate for the `execute-issues.md` orchestrator.
+- **Sub-issue linking**: REST API `repos/{owner}/{repo}/issues/{parent}/sub_issues`
+  works on all plans. Used successfully for all 35 sub-issues.
+- **PRD/TDD discrepancy found**: FR-034 says empty transcript produces
+  `emotion.json` with `segments: []`; TDD `runner.py` code returns `None`.
+  Issue #34 directs implementer to follow PRD.
+
+### TODOs Before Coding
+
+1. ⏳ **Resolve open questions** (TDD Section 7) — particularly:
+   - Q1: Pub/Sub MQTT auth — verify Cloudflare Pub/Sub supports persistent
+     sessions with short-lived credentials
+   - Q6: Pub/Sub offline queue depth/TTL — check Cloudflare docs or support
+2. ⏳ **Confirm Picovoice server license** pricing for Cloud Run
+3. ⏳ **Confirm Speechmatics plan** includes diarization + check rate limits
+4. ⏳ **Consider GitHub Enterprise** if automated dependency tracking becomes
+   valuable (adds `addIssueDependency` GraphQL mutation, ~$21/user/month)
+5. ⏳ **Create `.claude/CLAUDE.md`** with Agent Execution Rules before coding
+   (referenced in every sub-issue footer)
+
+---
+
+*Session completed: 2026-02-23*
+*Next session: Begin coding — Wave 1 (Parents #1 and #4 in parallel)*

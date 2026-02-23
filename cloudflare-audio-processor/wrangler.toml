@@ -1,0 +1,29 @@
+name = "audio-processor"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# R2 bucket for audio file storage
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "audio-uploads"
+
+# D1 database for batch tracking
+[[d1_databases]]
+binding = "DB"
+database_name = "audio-processor-db"
+database_id = "placeholder-id"
+
+# Queue for normal-priority processing jobs
+[[queues.producers]]
+binding = "PROCESSING_QUEUE"
+queue = "audio-processing"
+
+# Queue for immediate-priority processing jobs
+[[queues.producers]]
+binding = "PROCESSING_QUEUE_PRIORITY"
+queue = "audio-processing-priority"
+
+# KV namespace for OAuth token cache
+[[kv_namespaces]]
+binding = "TOKEN_CACHE"
+id = "placeholder-id"

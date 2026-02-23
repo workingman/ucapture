@@ -1,0 +1,1 @@
+// Queue message types (stub)

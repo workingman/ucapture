@@ -22,7 +22,7 @@
 | **Object Storage** | Cloudflare R2 | Zero egress fees (critical for GCP pulls), S3-compatible API, cheap storage ($0.015/GB/mo) | GCS (egress fees to Cloud Run), S3 (egress fees, no edge benefit) |
 | **Relational Index** | Cloudflare D1 | Serverless SQLite, low latency to Worker, sufficient for metadata scale (~10 users × 100 batches/day = 365K rows/year) | PostgreSQL on GCP (overkill, adds ops burden), Firestore (query limitations) |
 | **Job Queue** | Cloudflare Queues | Native Worker integration, automatic retries, FIFO + priority support | GCP Pub/Sub (adds cross-cloud complexity), SQS (not Cloudflare-native) |
-| **Event Stream** | Cloudflare Pub/Sub | MQTT-based, mobile-friendly, user-scoped topics, persistent connections | Server-Sent Events (requires open HTTP connection), Polling (inefficient), Firebase FCM (external dependency) |
+| **Event Stream** | Cloudflare Pub/Sub | MQTT-based, mobile-friendly, user-scoped topics. Offline delivery guaranteed via persistent sessions (`clean_session=false`, QoS 1) — broker queues messages while client is offline and delivers on reconnect. | Server-Sent Events (requires open HTTP connection), Polling (inefficient), Firebase FCM (external dependency, but better offline guarantee if Pub/Sub queue limits prove insufficient) |
 | **Authentication** | OAuth 2.0 (Google) | Leverages existing Google auth from Android app (already used for Drive), standard protocol, supports refresh tokens | Custom API keys (reinventing wheel), Auth0 (external cost) |
 | **ASR Engine** | Speechmatics Batch API | Chosen in PRD (high quality), speaker diarization, word timestamps | Whisper (slower, local compute cost), Deepgram (comparable, less familiar) |
 | **VAD** | Picovoice Cobra | Chosen in PRD, low latency, accurate silence trimming | WebRTC VAD (less accurate), Silero VAD (requires PyTorch, heavier) |
@@ -629,6 +629,28 @@ interface CompletionEvent {
 ```
 
 **Subscriber**: Android app (MQTT connection with OAuth-derived credentials)
+
+**Offline delivery — persistent session requirements**:
+
+The Android MQTT client MUST connect with the following settings to ensure
+messages published while the phone is offline are queued and delivered on
+reconnect:
+
+| Setting | Value | Purpose |
+| :--- | :--- | :--- |
+| `clean_session` | `false` | Broker retains session and queued messages across disconnects |
+| QoS | `1` (at least once) | Guarantees delivery; broker retries until client acknowledges |
+| Client ID | Stable, user-scoped (e.g. `ucapture-{user_id}`) | Required for broker to associate session across reconnects |
+
+With `clean_session=false` and QoS 1, Cloudflare Pub/Sub queues completion
+events while the client is offline and delivers them in order on reconnect —
+no polling fallback needed for normal offline gaps (phone off overnight, etc.).
+
+**Edge case**: Cloudflare Pub/Sub has an offline queue depth limit and TTL
+(exact values TBD — see Open Question 6). If the phone is offline longer than
+the broker's retention window, events beyond the limit will be dropped. In that
+case, the Android app should call `GET /v1/batches` on reconnect as a catch-up
+mechanism for any gaps.
 
 ---
 
@@ -1490,7 +1512,8 @@ migration.
 
 | # | Question | Impact | Proposed Resolution |
 | :--- | :--- | :--- | :--- |
-| 1 | **Pub/Sub subscription credentials for Android**: How does the Android app authenticate to Cloudflare Pub/Sub? | Blocks FR-041 implementation | Use Google OAuth `sub` claim as MQTT client ID, Worker generates short-lived MQTT credentials via API endpoint `/v1/pubsub/credentials` |
+| 1 | **Pub/Sub subscription credentials for Android**: How does the Android app authenticate to Cloudflare Pub/Sub? Android must connect with `clean_session=false` and a stable client ID for persistent sessions to work. | Blocks FR-041 implementation | Use Google OAuth `sub` claim as stable MQTT client ID (e.g. `ucapture-{sub}`). Worker generates short-lived MQTT credentials via `/v1/pubsub/credentials`. Verify Cloudflare Pub/Sub supports persistent sessions with these credential types. |
+| 6 | **Cloudflare Pub/Sub offline queue depth and TTL**: What is the maximum number of messages queued per offline client, and how long does the broker retain them? | Determines whether a polling fallback is needed for extended offline periods | Check Cloudflare Pub/Sub documentation / confirm with Cloudflare support. If limits are low (e.g. <24h retention), implement `GET /v1/batches` catch-up poll on reconnect as a safety net. |
 | 2 | **R2 bucket naming and creation**: Should we use one global bucket or per-environment buckets (dev/staging/prod)? | Affects deployment and testing | Use per-environment buckets: `audio-pipeline-dev`, `audio-pipeline-prod`. Document in deployment guide. |
 | 3 | **D1 database recovery from R2**: Should we build the DR recovery script as part of MVP or defer to ops runbook? | Low urgency but affects DR confidence | Defer to ops runbook (document algorithm in Section 6, Decision 2). Script can be built post-MVP if DR test is needed. |
 | 4 | **Priority queue implementation**: Cloudflare Queues support FIFO but not priority lanes out-of-box. How to implement "immediate" priority? | Affects FR-003 (upload priority flag) | Use two separate queues: `audio-processing-jobs-priority` and `audio-processing-jobs-normal`. GCP consumer polls priority queue first. |
@@ -1502,7 +1525,8 @@ migration.
 
 | Risk | Likelihood | Impact | Mitigation |
 | :--- | :--- | :--- | :--- |
-| **Cloudflare Pub/Sub MQTT auth complexity**: Android MQTT client integration may be more complex than anticipated | Medium | Medium | Prototype MQTT connection in Android app early (spike task). If too complex, fall back to polling `/v1/status` with exponential backoff. |
+| **Cloudflare Pub/Sub MQTT auth complexity**: Android MQTT client integration may be more complex than anticipated | Medium | Medium | Prototype MQTT connection in Android app early (spike task). Ensure `clean_session=false` and QoS 1 are supported with Cloudflare's credential model. If too complex, fall back to FCM or polling `/v1/status`. |
+| **Cloudflare Pub/Sub offline queue limits**: Broker may drop messages after exceeding queue depth or retention TTL for long offline periods | Low | Medium | Confirm limits with Cloudflare docs/support (Open Question 6). If limits are insufficient, implement `GET /v1/batches` catch-up poll on reconnect as a safety net. |
 | **R2 → GCP bandwidth costs**: R2 egress is free, but GCP Cloud Run ingress may have quotas or unexpected costs | Low | Medium | Monitor GCP network ingress in early testing. R2 egress is explicitly zero-fee per Cloudflare docs. |
 | **Picovoice licensing**: Server license costs may be higher than estimated | Low | High | Confirm Picovoice server/Linux license pricing before purchasing. Budget $500-1000/month for unlimited processing (verify with vendor). |
 | **Speechmatics latency**: Batch API may take minutes for long audio, blocking queue throughput | Medium | Medium | Set ASR timeout to 10 minutes (600s). If timeout common, explore Speechmatics Real-Time API (streaming) as alternative. |

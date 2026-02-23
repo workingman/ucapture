@@ -326,6 +326,10 @@ as processed and make the transcript available via a tap on the upload history.
   history entry without re-polling the backend.
 - Given a `failed` event, When the Android app receives it, Then the app
   indicates the processing failure on the history entry so the user is aware.
+- The event stream must deliver events to the Android app even if the phone
+  was offline when the event was published (e.g. battery dead, no network).
+  Delivery is guaranteed via MQTT persistent sessions (`clean_session=false`,
+  QoS 1) — see TDD section 4.3 for implementation requirements.
 
 **FR-042: Audio durability and retry on failure**
 Audio must never be lost. The system defines a clear durability contract between

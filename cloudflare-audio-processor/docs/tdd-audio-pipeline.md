@@ -46,10 +46,10 @@ The system is divided into two **deployment units** connected by a queue and eve
 - **External Interfaces**: HTTPS (Android app), R2, D1, Cloudflare Queues, Cloudflare Pub/Sub
 
 **2. GCP Cloud Run (Processing)**
-- **Responsibilities**: Audio transcoding, VAD (Cobra), denoising (Koala), ASR (Speechmatics), result storage
+- **Responsibilities**: Audio transcoding, VAD (Cobra), denoising (Koala), ASR (Speechmatics), emotion analysis (configurable provider), result storage
 - **Deployment**: GCP Cloud Run service (`audio-processor-gcp`)
 - **Language**: Python 3.11
-- **External Interfaces**: Cloudflare Queues (consumer), R2 (fetch/store), D1 (status updates), Speechmatics API
+- **External Interfaces**: Cloudflare Queues (consumer), R2 (fetch/store), D1 (status updates), Speechmatics API, Emotion Analysis API (Google Cloud NL, Hume AI, or self-hosted)
 
 ### Component Boundaries
 

@@ -92,6 +92,39 @@ flowchart TD
     style DONE    fill:#dcfce7,stroke:#16a34a
 ```
 
+## Improving Flowchart Layout Quality
+
+Mermaid's default layout engine (Dagre) produces mediocre results for complex
+flowcharts — crowded nodes, poor edge routing, unnecessary crossings. Two fixes:
+
+### Option 1: Switch to ELK renderer (recommended, one line)
+
+Add this init directive at the top of any `flowchart` or `graph` diagram:
+
+```
+%%{init: {"flowchart": {"defaultRenderer": "elk"}}}%%
+flowchart TD
+    ...
+```
+
+ELK (Eclipse Layout Kernel) is bundled with Mermaid v10+ and produces
+significantly better layouts. It's marked experimental but is stable in
+practice. Works in GitHub rendering, Mermaid Live Editor, and most
+Mermaid-aware tools.
+
+### Option 2: Switch to D2 for the diagram
+
+[D2](https://d2lang.com) is a competing diagram-as-code tool with a proprietary
+layout engine (TALA) that produces best-in-class results. Syntax is similar in
+spirit to Mermaid. Use `.d2` files. TALA requires a separate binary install but
+is free for local use.
+
+**Rule of thumb:** sequence diagrams → Mermaid is fine (layout is linear).
+Flowcharts/architecture graphs → add `defaultRenderer: elk` first; switch to D2
+if ELK still isn't good enough.
+
+---
+
 ## Reading the Diagram
 
 | Colour      | Stage                          |

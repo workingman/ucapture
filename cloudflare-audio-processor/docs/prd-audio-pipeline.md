@@ -51,7 +51,7 @@ investment.
 | :-- | :--- | :--- |
 | D-1 | **Cloudflare for ingest, storage, and indexing; GCP for compute** | Picovoice SDKs need a native runtime (can't run in CF Workers). CF provides free WAF/DDoS, cheap storage (R2 zero egress), and simple DB (D1). |
 | D-2 | **MVP with platform bones** | Ship a working pipeline fast, but use the queue-driven CF↔GCP split from day one so the architecture doesn't need re-doing. |
-| D-3 | **Speechmatics for ASR, behind a modular interface** | Speechmatics is the chosen engine. Abstract behind an interface so swapping to Whisper, Deepgram, etc. is a config change, not a rewrite. |
+| D-3 | **Speechmatics for Automatic Speech Recognition (ASR), behind a modular interface** | Speechmatics is the chosen engine. Abstract behind an interface so swapping to Whisper, Deepgram, etc. is a config change, not a rewrite. |
 | D-4 | **Batch-oriented upload model** | Each upload is a "batch" containing one audio file, one metadata JSON, zero or more images, and zero or more text notes. All artifacts in a batch are linked. |
 | D-5 | **DR-safe file naming** | File naming in R2 encodes enough information (user, batch ID, artifact type, timestamp) to reconstruct the D1 index from the R2 file listing alone. |
 | D-6 | **Async processing, not real-time** | Phone uploads completed chunks (5-30 min). Processing is queue-driven and asynchronous. No streaming/real-time transcription. |
@@ -76,14 +76,30 @@ attachments.
 - Given an upload missing the audio file, When the endpoint is called, Then a
   400 error is returned with a descriptive message.
 
-**FR-002: Authentication**
-The upload endpoint must require authentication to prevent unauthorized uploads.
+**FR-002: Authentication and multi-tenant user isolation**
+The upload endpoint must require authentication. The system must be architected
+to support an arbitrary number of users with strict data segregation, even if
+the MVP operates in a single-organization context. User isolation is enforced at
+the application layer (the Cloudflare Worker is the sole entry point to R2 and
+D1) rather than via separate storage buckets per user.
 
 *Acceptance Criteria:*
 - Given a request without valid credentials, When the endpoint is called, Then a
   401 error is returned.
 - Given valid credentials, When the endpoint is called, Then the request is
   processed and the user identity is associated with the batch.
+- Given two different authenticated users, When User A calls any endpoint, Then
+  User A cannot access, list, or modify any data belonging to User B.
+- Given the R2 file naming scheme (see FR-012), Then all artifacts for a user
+  are stored under a user-scoped path prefix, and the Worker refuses any request
+  whose authenticated user ID does not match the path prefix being accessed.
+- Given the D1 index, Then all batch records include a user ID foreign key and
+  all queries are scoped to the authenticated user.
+
+*Architecture note:* A single R2 bucket with user-prefixed paths is sufficient
+for this use case. Separate per-user buckets may be evaluated for regulated or
+enterprise deployments but are not required here. Per-user metrics (FR-050) are
+in scope to support future billing or usage-capped tiers.
 
 **FR-003: Upload priority flag**
 The upload must support an optional priority flag ("upload now") that moves the
@@ -115,7 +131,8 @@ artifacts.
 
 **FR-012: DR-safe file naming convention**
 Files in R2 must be named such that the D1 index can be fully reconstructed
-from the R2 file listing alone.
+from the R2 file listing alone. The user-scoped path prefix also serves as the
+primary data isolation boundary (see FR-002).
 
 *Acceptance Criteria:*
 - Given a complete loss of D1, When R2 is listed and file paths are parsed,
@@ -123,6 +140,9 @@ from the R2 file listing alone.
   audio, and transcript belong together) can be reconstructed.
 - Given a file path in R2, When it is parsed, Then the user ID, batch ID,
   artifact type, and original timestamp are extractable.
+- Given the Worker's access control (FR-002), Then no authenticated request can
+  reach a path whose leading `{user_id}` segment differs from the caller's
+  authenticated identity.
 
 **Proposed naming scheme** (constraint for TDD — exact format is a TDD decision):
 ```
@@ -191,12 +211,27 @@ speaker diarization enabled.
 
 *Acceptance Criteria:*
 - Given cleaned audio, When Speechmatics processes it, Then a transcript is
-  returned with word-level timestamps, confidence scores, and speaker labels.
+  returned with speaker labels and inline timestamp markers at approximately
+  15-second intervals.
+- Timestamp markers are produced by post-processing the Speechmatics
+  word-timestamp response: after receiving the full response, walk the word list
+  and emit an inline marker (e.g. `[00:00]`, `[00:15]`, `[00:30]`) each time a
+  15-second boundary is crossed. The stored transcript is human-readable text
+  with embedded markers and speaker labels.
 - Given a conversation between two people, When the transcript is reviewed, Then
-  utterances are attributed to distinct speaker identifiers.
-- Given the transcript, When it is stored, Then the full Speechmatics response
-  is preserved (not just plain text), including word-level timestamps,
-  confidence scores, and speaker labels.
+  utterances are attributed to distinct speaker identifiers (e.g. `Speaker 1`,
+  `Speaker 2`).
+- Given the transcript, When it is stored, Then the full raw Speechmatics
+  response is also preserved alongside the formatted text, to allow future
+  reprocessing at finer granularity without re-submitting audio.
+
+*Note on emotional/sentiment evaluation:* Neither Speechmatics Batch API nor
+Koala provide per-utterance sentiment or emotion metadata as standard output.
+Koala is a noise suppressor only. Speechmatics returns transcription and
+diarization but no affective analysis. Prosodic or sentiment analysis would
+require a separate post-processing pass (e.g. LLM-based) applied to the stored
+transcript. This is out of scope for MVP; preserving the full raw Speechmatics
+response (above) ensures the data is available for it in future.
 
 **FR-033: Modular ASR interface**
 The transcription engine must be accessed through an abstraction layer.
@@ -218,35 +253,93 @@ in the upload request.
 - Given a queued batch, When a processing worker is available, Then the batch is
   picked up and processed.
 
-**FR-041: Completion event**
-The system must emit an event when processing completes, to trigger downstream
-workflows.
+**FR-041: Completion event and downstream subscribers**
+The system must emit an event when processing completes. The uCapture Android
+app is the primary initial subscriber: it uses this event to mark a recording
+as processed and make the transcript available via a tap on the upload history.
 
 *Acceptance Criteria:*
 - Given a batch that finishes processing (success or failure), Then an event is
   emitted containing the batch ID, user ID, status, and R2 paths of all
   artifacts.
-- Given a downstream consumer, When it subscribes to completion events, Then it
-  receives events for all completed batches.
+- Given a downstream consumer authenticated as User A, When it subscribes to
+  the event stream, Then it receives events only for User A's batches (events
+  are user-scoped).
+- The event payload must include: `batch_id`, `user_id`, `status`
+  (`completed` | `failed`), `artifact_paths` (keyed by artifact type), and
+  `recording_started_at` (so the client can correlate the event to a local
+  recording session).
+- Given a `completed` event, When the Android app receives it, Then the app can
+  present a "transcript available" affordance on the corresponding upload
+  history entry without re-polling the backend.
+- Given a `failed` event, When the Android app receives it, Then the app
+  indicates the processing failure on the history entry so the user is aware.
 
-**FR-042: Retry on transient failure**
-Transient processing failures must be retried automatically.
+**FR-042: Audio durability and retry on failure**
+Audio must never be lost. The system defines a clear durability contract between
+the Android client and the backend.
 
-*Acceptance Criteria:*
-- Given a transient failure (network error, Speechmatics timeout), When the
-  failure occurs, Then the batch is re-queued with exponential backoff.
-- Given 3 consecutive failures for a batch, Then the batch is marked `failed`
-  and no further retries are attempted.
+*Upload safety (Android-side responsibility — stated here for system clarity):*
+- Given an upload that fails for any reason (network, server error, auth), Then
+  the audio file must remain on-device and be re-queued for upload. The Android
+  app must not delete any audio file until it has received a confirmed `202
+  Accepted` response from the ingest endpoint (i.e. the file is durably in R2).
+
+*Backend durability:*
+- Given audio stored in R2, When any downstream processing step fails (VAD,
+  noise suppression, transcription), Then the raw audio in R2 is unaffected.
+  Processing failures must never delete or overwrite the raw audio.
+- Given a batch in `failed` state, Then the batch can be reprocessed by
+  re-enqueuing it without re-uploading the audio. All raw artifacts remain
+  available in R2 for retry.
+- Given a batch in `failed` state, Then an operator or automated system can
+  trigger reprocessing by queuing the batch_id for re-processing.
+
+*Retry:*
+- Given a transient failure (network error, Speechmatics timeout, GCP error),
+  When the failure occurs, Then the batch is re-queued with exponential backoff.
+- Given 3 consecutive failures for a batch, Then the batch is marked `failed`,
+  no further automatic retries are attempted, and a `failed` completion event
+  is emitted (FR-041) so downstream consumers are notified.
 
 ### 3.6 Observability (MVP level)
 
-**FR-050: Processing metrics**
-The system must log key metrics for each batch.
+**FR-050: Processing metrics and observability**
+The system must log key metrics for each batch and expose aggregated metrics for
+operational, performance, and cost visibility. These form the basis for a future
+cost and performance dashboard (costs are expected to scale with usage — see
+TC-11).
 
-*Acceptance Criteria:*
-- Given a processed batch, When logs are checked, Then the following are
-  recorded: upload size, Cobra speech ratio (% of audio that was speech),
-  processing duration per stage, Speechmatics job ID, and final status.
+*Per-batch metrics (logged on completion):*
+- Upload artifact sizes: raw audio bytes, metadata bytes, total multipart size
+- Audio durations: raw input (seconds), speech-only segment submitted to
+  Speechmatics (seconds), and the Cobra speech ratio (speech / total)
+- Audio size before and after Koala (bytes) to track denoise compression delta
+- Processing wall-clock time per stage: transcode, Cobra VAD, Koala denoise,
+  Speechmatics API wait, post-processing (timestamp formatting, storage writes)
+- End-to-end latency: time from upload timestamp to `completed` or `failed`
+  status
+- Queue wait time: delta from upload-complete to processing-start
+- Speechmatics job ID (for invoice reconciliation) and audio duration as
+  reported by Speechmatics
+- Speechmatics cost estimate for the batch (audio_duration_hours × rate,
+  logged at submission time)
+- Retry count (0 if first attempt succeeded; records total attempts on failure)
+- Final status and, if `failed`, the failing stage and error message
+
+*System-wide / aggregated metrics:*
+- Batches processed per hour and per day (throughput)
+- Error rate broken down by stage: upload validation, VAD, denoise, ASR,
+  post-processing
+- R2 storage consumed: raw audio total, cleaned audio total, transcript total —
+  reported per user and system-wide
+- Cumulative Speechmatics API cost: rolling 30-day window, per user, and
+  system-wide total
+- Queue depth at any given time (backlog of unprocessed or retrying batches)
+- Active concurrent GCP Cloud Run processing jobs
+- D1 read/write latency percentiles (p50, p95) to detect index degradation
+- Per-user batch count and audio hours processed (for capacity planning and
+  future per-user billing)
 
 ---
 
@@ -259,7 +352,7 @@ The system must log key metrics for each batch.
 | NG-3 | **Standalone image/note processing** | Images and notes are stored and indexed as batch metadata. No OCR, image analysis, or NLP is performed on them. |
 | NG-4 | **Speaker identification** | Diarization assigns anonymous speaker labels (Speaker 1, Speaker 2). Mapping those to real identities (contact names, team members) is out of scope — that's downstream AI. |
 | NG-5 | **Web UI** | No user-facing interface for browsing transcripts, playback, or search. API-only. |
-| NG-6 | **Multi-tenant / billing** | Single-org system. All users belong to one organization. |
+| NG-6 | **Billing and per-user metering** | No per-user billing, invoicing, or payment processing in MVP. The architecture is explicitly designed for multi-tenant use (user-scoped data, user-scoped event streams, per-user metrics in FR-050). Cost observability per user is in scope; charging users for it is not. |
 | NG-7 | **Android app changes** | The uCapture app modifications to target this endpoint instead of Google Drive are a separate effort (though the upload format defined here is informed by the existing sidecar format). |
 
 ---
@@ -274,10 +367,11 @@ The system must log key metrics for each batch.
 | TC-4 | Picovoice SDKs require 16 kHz, single-channel, 16-bit PCM input (confirmed via Koala Python demo docs and shared `pv_sample_rate()`). Audio must be transcoded on GCP before Cobra/Koala processing — not on the phone, to minimize battery consumption (44.1 kHz AAC uses hardware-accelerated encoding on Android). |
 | TC-5 | Speechmatics Batch API accepts multiple formats including M4A. Cleaned audio format (post-Koala) must be compatible. |
 | TC-6 | R2 has no egress fees. GCP Cloud Run will need to pull raw audio from R2 and push cleaned audio back. |
-| TC-7 | D1 has a 10GB storage limit (paid plan). Metadata and index only — not audio content. |
+| TC-7 | D1 is on a paid plan. The 10GB storage limit applies to the paid tier; metadata and index only — not audio content. This is sufficient for the expected data volume at scale. |
 | TC-8 | ~10 users recording up to 24x7. Cobra/Koala will substantially reduce stored audio volume, but ingest must handle the full raw volume. |
 | TC-9 | Upload chunks are 5-30 minutes of audio. At 128 kbps AAC, that's ~5-22 MB per chunk. |
 | TC-10 | Picovoice requires an access key (licensed per platform). Server-side processing needs a server/Linux license. |
+| TC-11 | There is no requirement to remain within the free tier of any provider (Cloudflare, GCP, Speechmatics, Picovoice). Costs are expected to scale with usage. Cost management is handled through observability (FR-050), not through architectural constraints that sacrifice capability. |
 
 ### Assumptions
 

@@ -6,7 +6,7 @@ sequenceDiagram
     participant Q as Queue (CF Queue)
     participant GCP as GCP Cloud Run
     participant SM as Speechmatics API
-    participant DS as Downstream (event)
+    participant DS as Event Stream
 
     Note over Phone,CF: Upload Phase
     Phone->>CF: POST /upload (audio + metadata + images + notes)
@@ -30,15 +30,20 @@ sequenceDiagram
 
     alt Speech detected
         GCP->>SM: Submit cleaned audio (Batch API)
-        SM-->>GCP: Transcript (word timestamps + confidence)
+        SM-->>GCP: Transcript (word timestamps + speaker labels)
+        GCP->>GCP: Post-process: insert [00:15] markers at 15s intervals
         GCP->>R2: Store cleaned audio
-        GCP->>R2: Store transcript JSON
+        GCP->>R2: Store transcript (formatted + raw Speechmatics response)
         GCP->>D1: Update batch (status: completed, artifact paths)
-        GCP->>DS: Emit completion event (batch_id, user_id, paths)
+        GCP->>DS: Emit completion event (batch_id, user_id, status, paths)
     else No speech detected
         GCP->>D1: Update batch (status: completed, empty transcript)
         GCP->>DS: Emit completion event (no speech)
     end
+
+    Note over DS,Phone: Completion Notification (user-scoped)
+    DS-->>Phone: Completion event for user's batch
+    Note over Phone: Mark recording as processed<br/>Expose transcript in upload history
 
     Note over Phone,CF: Status Query (optional)
     Phone->>CF: GET /status/{batch_id}

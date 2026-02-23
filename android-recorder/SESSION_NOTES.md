@@ -120,7 +120,45 @@ Resume → Chunk 2 starts (same session)
 Stop → Chunk 2 finalized (if recording) or cleanup (if paused)
 ```
 
+## Key Changes This Session (2026-02-17)
+
+### Silence Detection Design
+Designed on-device silence detection strategy. No compute-intensive work or licensing on device.
+
+**Approach:**
+1. Poll `MediaRecorder.getMaxAmplitude()` every 500ms during recording (free — reads codec's internal peak meter)
+2. Store amplitude log (boolean or 8-bit value per interval) in metadata JSON alongside each chunk
+3. **Silent chunk short-circuit:** if an entire chunk is silent, upload metadata only — no audio file
+   - `audio_file: null`
+   - `skip_reason: "silent_chunk"`
+4. **Server-side trimming:** GCP pipeline uses the amplitude log + ffmpeg to trim silent regions from audio before storing to R2 (minimizes file size and storage cost)
+5. Silent-chunk D1 records stored for session continuity, marked `status: skipped/silent`
+
+**Integration point:** chunk completion in ChunkManager/RecordingService, before handing to upload queue.
+
+See `../cloudflare-audio-processor/SESSION_NOTES.md` for server-side details.
+
+**Task:** #1 in task list (pending implementation).
+
+---
+
 ## Next Steps
+
+### Backend Integration (cloudflare-audio-processor)
+- **Event subscriber for batch completion** (cloudflare-audio-processor FR-041)
+  — When the Cloudflare pipeline finishes processing a batch, the Android app
+  should subscribe to the completion event stream filtered by user ID.
+  On completion event: mark the recording as processed in local history and
+  expose a tap-to-view affordance for the transcript. On failure event: show a
+  processing-failed indicator on the history entry.
+  Requires:
+  1. Choose a push mechanism: CF Queues consumer endpoint, webhook, SSE, or
+     polling `/status/{batch_id}` (polling is simplest for MVP).
+  2. New `RecordingStatus` state: `TRANSCRIPT_AVAILABLE` and
+     `PROCESSING_FAILED` alongside existing `UPLOADED`.
+  3. Upload history list item UI: show "Transcript available" tap target.
+  4. Transcript viewer screen or bottom sheet displaying formatted transcript
+     with inline `[00:15]` timestamp markers and speaker labels.
 
 ### Remaining MVP Work (by priority)
 1. **RetentionManager fix** — Uploaded files (0.9GB) never get deleted from disk. Files from Feb 3 still present 5 days later. Investigate `RetentionManager` / post-upload cleanup logic. (Discovered 2026-02-08 via ADB after phone reboot; reboot itself was not caused by the app.)
@@ -161,4 +199,4 @@ adb -s 49180DLAQ003R6 logcat -s UploadWorker GoogleDriveAuthManager GoogleDriveS
 
 ---
 **Created:** 2025-12-13
-**Updated:** 2026-02-08
+**Updated:** 2026-02-17

@@ -160,18 +160,21 @@ See `../cloudflare-audio-processor/SESSION_NOTES.md` for server-side details.
   4. Transcript viewer screen or bottom sheet displaying formatted transcript
      with inline `[00:15]` timestamp markers and speaker labels.
 
-- **MQTT offline gap — startup polling required**
-  The Cloudflare Pub/Sub MQTT event stream does NOT guarantee delivery to
-  offline clients. If the phone is off or has no network when a batch
-  completes, the completion event is lost. The app must compensate by
-  polling `GET /v1/batches` on every app startup and on network reconnect,
-  comparing completed batches from the backend against local history, and
-  updating any entries that are `completed` on the backend but still show
-  as `UPLOADED` locally. MQTT is for real-time convenience when online;
-  the startup poll is the reliability guarantee.
-  Alternative worth evaluating: replace MQTT with FCM (Firebase Cloud
-  Messaging), which queues messages for offline Android devices and delivers
-  on reconnect. Already in the Google ecosystem; essentially free.
+- **MQTT offline delivery — use persistent sessions (QoS 1)**
+  By default MQTT drops messages for offline clients. To ensure delivery
+  after the phone has been off or offline for hours, the Android MQTT client
+  must connect with `clean_session = false` and subscribe at QoS 1.
+  Cloudflare Pub/Sub supports persistent sessions: the broker queues
+  messages while the client is offline and delivers them in order on
+  reconnect. Implementation requirements:
+  1. Connect with `cleanSession = false` and a stable, unique client ID
+     (e.g. derived from the Google OAuth `sub` claim).
+  2. Subscribe to `batch-completions/{user_id}` at QoS 1.
+  3. Verify Cloudflare Pub/Sub's offline queue depth limit and TTL (confirm
+     with Cloudflare docs — likely capped at N messages or T hours) so we
+     understand the edge case where the phone is offline longer than the
+     broker retains messages. If that limit is hit, fall back to polling
+     `GET /v1/batches` on reconnect as a catch-up mechanism.
 
 ### Remaining MVP Work (by priority)
 1. **RetentionManager fix** — Uploaded files (0.9GB) never get deleted from disk. Files from Feb 3 still present 5 days later. Investigate `RetentionManager` / post-upload cleanup logic. (Discovered 2026-02-08 via ADB after phone reboot; reboot itself was not caused by the app.)

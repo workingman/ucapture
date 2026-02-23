@@ -6,6 +6,7 @@ sequenceDiagram
     participant Q as Queue (CF Queue)
     participant GCP as GCP Cloud Run
     participant SM as Speechmatics API
+    participant EA as Emotion API (configurable)
     participant DS as Event Stream
 
     Note over Phone,CF: Upload Phase
@@ -32,8 +33,11 @@ sequenceDiagram
         GCP->>SM: Submit cleaned audio (Batch API)
         SM-->>GCP: Transcript (word timestamps + speaker labels)
         GCP->>GCP: Post-process: insert [00:15] markers at 15s intervals
+        GCP->>EA: Analyze sentiment per segment (default: Google Cloud NL)
+        EA-->>GCP: Emotion metadata (provider-tagged JSON)
         GCP->>R2: Store cleaned audio
         GCP->>R2: Store transcript (formatted + raw Speechmatics response)
+        GCP->>R2: Store emotion.json (provider-tagged, best-effort)
         GCP->>D1: Update batch (status: completed, artifact paths)
         GCP->>DS: Emit completion event (batch_id, user_id, status, paths)
     else No speech detected

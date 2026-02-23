@@ -1,0 +1,77 @@
+graph TB
+    subgraph Android["Android App (uCapture)"]
+        AndroidAuth["OAuth 2.0 with Google"]
+        AndroidUpload["Multipart Upload"]
+        AndroidMQTT["MQTT Subscription"]
+    end
+
+    subgraph CloudflareEdge["Cloudflare Edge"]
+        subgraph Worker["Cloudflare Worker (TypeScript)"]
+            AuthMiddleware["Auth Middleware<br/>(OAuth 2.0 token validation)"]
+            UploadHandler["Upload Handler<br/>- Parse multipart → R2<br/>- Create batch record in D1<br/>- Enqueue processing job"]
+            StatusHandler["Status Handler<br/>- Query D1 by batch_id<br/>- User-scoped"]
+            EventPublisher["Event Publisher<br/>- Publish to Pub/Sub<br/>- Topic: batch-completions/{user_id}"]
+        end
+
+        R2["Cloudflare R2<br/>(S3-compatible)<br/>Zero egress fees"]
+        D1["Cloudflare D1<br/>(SQLite)<br/>Batch index"]
+        Queue["Cloudflare Queues<br/>(FIFO + priority)"]
+        PubSub["Cloudflare Pub/Sub<br/>(MQTT)"]
+    end
+
+    subgraph GCPCompute["GCP Cloud Run"]
+        subgraph CloudRun["Cloud Run Service (Python)"]
+            QueueConsumer["Queue Consumer<br/>- Receive job<br/>- Update D1 status"]
+            AudioPipeline["Audio Pipeline<br/>1. Fetch from R2<br/>2. Transcode (ffmpeg)<br/>3. Cobra VAD<br/>4. Koala denoise<br/>5. Speechmatics ASR"]
+            ResultWriter["Result Writer<br/>- Store to R2<br/>- Update D1<br/>- Trigger event"]
+        end
+    end
+
+    Speechmatics["Speechmatics Batch API<br/>(external SaaS)<br/>ASR + diarization"]
+    EmotionAPI["Emotion API<br/>(configurable provider)<br/>Default: Google Cloud NL<br/>Alt: Hume AI, self-hosted"]
+
+    %% Android to Worker
+    Android -->|HTTPS POST /v1/upload| AuthMiddleware
+    Android -->|HTTPS GET /v1/status| AuthMiddleware
+    Android -.->|MQTT subscribe<br/>batch-completions/{user_id}| PubSub
+
+    %% Worker internal flow
+    AuthMiddleware --> UploadHandler
+    AuthMiddleware --> StatusHandler
+    UploadHandler --> R2
+    UploadHandler --> D1
+    UploadHandler --> Queue
+    StatusHandler --> D1
+    EventPublisher --> PubSub
+
+    %% Queue to GCP
+    Queue -->|consume job| QueueConsumer
+
+    %% GCP processing flow
+    QueueConsumer --> AudioPipeline
+    AudioPipeline -->|fetch raw audio| R2
+    AudioPipeline -->|submit cleaned audio| Speechmatics
+    Speechmatics -->|transcript + diarization| AudioPipeline
+    AudioPipeline -->|analyze transcript segments<br/>(best-effort)| EmotionAPI
+    EmotionAPI -->|provider-tagged emotion JSON| AudioPipeline
+    AudioPipeline --> ResultWriter
+    ResultWriter -->|store cleaned audio<br/>+ transcript + emotion.json| R2
+    ResultWriter -->|update status<br/>+ metrics| D1
+    ResultWriter -->|trigger event via<br/>POST /internal/publish-event| EventPublisher
+
+    %% Event flow back to Android
+    PubSub -.->|completion event| AndroidMQTT
+
+    %% Styling
+    classDef androidClass fill:#a8e6cf,stroke:#333,stroke-width:2px
+    classDef workerClass fill:#ffd3b6,stroke:#333,stroke-width:2px
+    classDef storageClass fill:#ffaaa5,stroke:#333,stroke-width:2px
+    classDef gcpClass fill:#dcedc1,stroke:#333,stroke-width:2px
+    classDef externalClass fill:#c7ceea,stroke:#333,stroke-width:2px
+
+    class Android,AndroidAuth,AndroidUpload,AndroidMQTT androidClass
+    class Worker,AuthMiddleware,UploadHandler,StatusHandler,EventPublisher workerClass
+    class R2,D1,Queue,PubSub storageClass
+    class CloudRun,QueueConsumer,AudioPipeline,ResultWriter gcpClass
+    class Speechmatics externalClass
+    class EmotionAPI externalClass

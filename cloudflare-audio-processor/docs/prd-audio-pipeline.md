@@ -56,6 +56,7 @@ investment.
 | D-5 | **DR-safe file naming** | File naming in R2 encodes enough information (user, batch ID, artifact type, timestamp) to reconstruct the D1 index from the R2 file listing alone. |
 | D-6 | **Async processing, not real-time** | Phone uploads completed chunks (5-30 min). Processing is queue-driven and asynchronous. No streaming/real-time transcription. |
 | D-7 | **Downstream triggering is in scope; downstream processing is not** | The pipeline must emit an event on completion. What consumes that event is a separate concern. |
+| D-8 | **Pluggable emotion analysis, starting with Google Cloud NL; provider tagged in output** | Different emotion providers produce incompatible schemas (polarity score vs. categorical labels vs. dimensional vectors). Rather than normalising, the `provider` field is stored in the output JSON so downstream consumers can branch on it. Google Cloud NL is the starting point: cheap, native GCP, text-only, trivial to integrate. Hume AI (audio-based, highest quality) and self-hosted HuggingFace models (free, text or audio) are documented alternatives. Emotion analysis is best-effort — failure does not fail the batch. |
 
 ---
 
@@ -241,6 +242,57 @@ The transcription engine must be accessed through an abstraction layer.
   it can replace Speechmatics with a configuration change and no code changes
   to the pipeline.
 
+**FR-034: Pluggable emotion/sentiment analysis**
+After transcription, the system must apply an emotion/sentiment analysis pass to
+the transcript and include the results as structured metadata stored alongside
+the transcript in R2. The initial provider is Google Cloud Natural Language API
+(text-based sentiment).
+
+*Acceptance Criteria:*
+- Given a completed transcript with speech segments, When the emotion analysis
+  step runs, Then each sentence-level segment is annotated with
+  emotion/sentiment metadata from the configured provider.
+- Given the stored `emotion.json`, Then a `provider` field identifies which
+  analysis engine produced the data, allowing downstream consumers to interpret
+  the provider-specific `analysis` object accordingly.
+- Given a segment, Then the emotion record includes: `speaker`,
+  `start_seconds`, `end_seconds`, `text`, `provider`, `provider_version`, and
+  `analysis` (provider-specific schema).
+- Given zero speech segments or an empty transcript, Then the emotion step is
+  skipped and `emotion.json` contains `{ "provider": "...", "segments": [] }`.
+- Given a failure in the emotion analysis step, Then the failure is logged and
+  the batch is still marked `completed` — emotion analysis is best-effort and
+  does not block the primary transcript artifact. The `transcript_emotion_path`
+  in D1 is left null.
+
+**FR-035: Modular emotion provider interface**
+The emotion analysis engine must be accessed through an abstraction layer,
+following the same pattern as FR-033 for ASR. The `provider` field in the
+output JSON is the key that allows downstream consumers to interpret the
+varying schemas produced by different providers.
+
+*Acceptance Criteria:*
+- Given a new emotion provider implementation, When it conforms to the
+  interface, Then it can replace or supplement the current provider with a
+  configuration change and no code changes to the pipeline.
+- The interface accepts: a list of transcript segments (speaker, timestamps,
+  text). It does not require the audio file for text-based providers, but may
+  optionally receive the cleaned audio path for audio-based providers (e.g.
+  Hume AI, audeering).
+- The interface returns a JSON envelope with: `provider`, `provider_version`,
+  `analyzed_at` (ISO 8601), and `segments` (array of per-segment results).
+- The `analysis` object schema is provider-specific and versioned by the
+  `provider` field. Known schemas:
+  - `google-cloud-nl`: `{ "score": float, "magnitude": float }` — score
+    -1.0 (negative) to +1.0 (positive); magnitude is intensity regardless
+    of polarity
+  - `hume-ai`: `{ "prosody": { [emotion_name]: float } }` — 48-dimensional
+    continuous emotion space from audio waveform
+  - `j-hartmann-distilroberta`: `{ "emotion": string, "confidence": float }`
+    — one of: anger, disgust, fear, joy, neutral, sadness, surprise
+  - `audeering-wav2vec2`: `{ "arousal": float, "dominance": float,
+    "valence": float }` — continuous dimensional scores from audio
+
 ### 3.5 Orchestration
 
 **FR-040: Queue-driven processing**
@@ -386,12 +438,15 @@ TC-11).
 
 ## 6. Design & Visuals
 
-See companion diagram: [`flow-audio-pipeline.mmd`](flow-audio-pipeline.mmd)
+See companion diagrams:
+- [`prd-audio-pipeline-figure1.mmd`](prd-audio-pipeline-figure1.mmd) — end-to-end sequence diagram
+- [`tdd-audio-pipeline-figure1.mmd`](tdd-audio-pipeline-figure1.mmd) — component architecture diagram
 
-The diagram shows the end-to-end flow:
+The sequence diagram shows the end-to-end flow:
 1. Phone uploads batch to Cloudflare Worker
 2. Worker stores artifacts in R2, indexes in D1, queues processing
 3. GCP Cloud Run picks up the job, pulls audio from R2
 4. Cobra → Koala → Speechmatics processing chain
-5. Results written back to R2, D1 updated
-6. Completion event emitted for downstream consumers
+5. Emotion analysis pass (Google Cloud NL by default, best-effort)
+6. Results written back to R2, D1 updated
+7. Completion event emitted; Android app marks recording as processed

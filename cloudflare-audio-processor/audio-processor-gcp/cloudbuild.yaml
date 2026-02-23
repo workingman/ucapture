@@ -1,0 +1,25 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/audio-processor:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/audio-processor:latest'
+      - '.'
+
+  # Push the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/audio-processor:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/audio-processor:latest'
+
+images:
+  - 'gcr.io/$PROJECT_ID/audio-processor:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/audio-processor:latest'

@@ -1,0 +1,21 @@
+[project]
+name = "audio-processor-gcp"
+version = "0.1.0"
+description = "GCP Cloud Run audio processing service for the uCapture pipeline"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+
+[tool.black]
+target-version = ["py311"]
+line-length = 88

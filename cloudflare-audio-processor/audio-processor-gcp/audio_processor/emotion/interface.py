@@ -1,0 +1,1 @@
+"""Abstract emotion analysis interface."""

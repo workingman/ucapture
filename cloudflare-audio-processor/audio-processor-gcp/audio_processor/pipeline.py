@@ -23,6 +23,7 @@ from audio_processor.audio.denoise import get_denoise_engine
 from audio_processor.audio.transcode import transcode_to_wav
 from audio_processor.audio.vad import get_vad_engine
 from audio_processor.emotion.runner import run_emotion_analysis
+from audio_processor.observability.metrics import BatchMetrics, log_batch_metrics
 from audio_processor.storage.d1_client import D1Client
 from audio_processor.storage.r2_client import R2Client
 from audio_processor.utils.errors import PipelineError
@@ -101,6 +102,7 @@ async def process_batch(
     user_id: str,
     r2_client: R2Client | None = None,
     d1_client: D1Client | None = None,
+    queue_wait_time_seconds: float = 0.0,
 ) -> ProcessingResult:
     """Orchestrate processing of a single audio batch.
 
@@ -112,6 +114,8 @@ async def process_batch(
         user_id: User identifier for R2 path construction.
         r2_client: Optional R2Client (creates default if not provided).
         d1_client: Optional D1Client (creates default if not provided).
+        queue_wait_time_seconds: Time spent waiting in queue before
+            processing started (passed by the consumer).
 
     Returns:
         ProcessingResult with status, artifacts, and metrics.
@@ -139,6 +143,7 @@ async def process_batch(
             d1_client=d1_client,
             stage_timings=stage_timings,
             artifact_paths=artifact_paths,
+            queue_wait_time_seconds=queue_wait_time_seconds,
         )
         return result
 
@@ -208,6 +213,21 @@ async def process_batch(
             stage_timings=stage_timings,
         )
 
+        # Emit observability metrics for the failed batch
+        batch_metrics = _build_batch_metrics(
+            batch_id=batch_id,
+            user_id=user_id,
+            status="failed",
+            stage_timings=stage_timings,
+            wall_time=wall_time,
+            queue_wait_time_seconds=queue_wait_time_seconds,
+            raw_audio_size_bytes=0,
+            retry_count=retry_count,
+            error_stage=current_stage,
+            error_message=error_message,
+        )
+        log_batch_metrics(batch_metrics)
+
         return ProcessingResult(
             status="failed",
             batch_id=batch_id,
@@ -225,6 +245,7 @@ async def _run_pipeline(
     d1_client: D1Client,
     stage_timings: dict[str, float],
     artifact_paths: dict[str, str],
+    queue_wait_time_seconds: float = 0.0,
 ) -> ProcessingResult:
     """Execute the full pipeline stages. Raises on failure."""
     wall_start = time.monotonic()
@@ -234,6 +255,8 @@ async def _run_pipeline(
         raw_audio_key = f"{path_prefix}/audio/recording.m4a"
         with _StageTimer("fetch", stage_timings):
             audio_data = await _fetch_with_retry(r2_client, raw_audio_key)
+
+        raw_audio_size_bytes = len(audio_data)
 
         # Write raw audio to temp file for processing
         raw_audio_path = os.path.join(tmp_dir, "recording.m4a")
@@ -270,6 +293,8 @@ async def _run_pipeline(
                 stage_timings=stage_timings,
                 artifact_paths=artifact_paths,
                 wall_start=wall_start,
+                queue_wait_time_seconds=queue_wait_time_seconds,
+                raw_audio_size_bytes=raw_audio_size_bytes,
             )
 
         # Stage 4: Denoise (passthrough with null provider)
@@ -393,6 +418,24 @@ async def _run_pipeline(
             )
             await d1_client.publish_completion_event(event)
 
+        # Emit observability metrics for the completed batch
+        batch_metrics = _build_batch_metrics(
+            batch_id=batch_id,
+            user_id=user_id,
+            status="completed",
+            stage_timings=stage_timings,
+            wall_time=wall_time,
+            queue_wait_time_seconds=queue_wait_time_seconds,
+            raw_audio_size_bytes=raw_audio_size_bytes,
+            raw_audio_duration_seconds=raw_duration,
+            speech_duration_seconds=speech_duration,
+            speech_ratio=speech_ratio,
+            cleaned_audio_size_bytes=cleaned_audio_size,
+            speechmatics_job_id=speechmatics_job_id,
+            speechmatics_cost_estimate=speechmatics_cost,
+        )
+        log_batch_metrics(batch_metrics)
+
         return ProcessingResult(
             status="completed",
             batch_id=batch_id,
@@ -411,6 +454,8 @@ async def _handle_zero_speech(
     stage_timings: dict[str, float],
     artifact_paths: dict[str, str],
     wall_start: float,
+    queue_wait_time_seconds: float = 0.0,
+    raw_audio_size_bytes: int = 0,
 ) -> ProcessingResult:
     """Handle a batch with no detected speech.
 
@@ -455,6 +500,21 @@ async def _handle_zero_speech(
             artifact_paths=artifact_paths,
         )
         await d1_client.publish_completion_event(event)
+
+    # Emit observability metrics for zero-speech batch
+    batch_metrics = _build_batch_metrics(
+        batch_id=batch_id,
+        user_id=user_id,
+        status="completed",
+        stage_timings=stage_timings,
+        wall_time=wall_time,
+        queue_wait_time_seconds=queue_wait_time_seconds,
+        raw_audio_size_bytes=raw_audio_size_bytes,
+        raw_audio_duration_seconds=raw_duration,
+        speech_duration_seconds=0.0,
+        speech_ratio=0.0,
+    )
+    log_batch_metrics(batch_metrics)
 
     return ProcessingResult(
         status="completed",
@@ -501,6 +561,54 @@ def _determine_error_stage(
         return type(exc).__name__.lower().replace("error", "")
 
     return "unknown"
+
+
+def _build_batch_metrics(
+    batch_id: str,
+    user_id: str,
+    status: str,
+    stage_timings: dict[str, float],
+    wall_time: float,
+    queue_wait_time_seconds: float = 0.0,
+    raw_audio_size_bytes: int = 0,
+    raw_audio_duration_seconds: float = 0.0,
+    speech_duration_seconds: float = 0.0,
+    speech_ratio: float = 0.0,
+    cleaned_audio_size_bytes: int = 0,
+    speechmatics_job_id: str = "",
+    speechmatics_cost_estimate: float = 0.0,
+    retry_count: int = 0,
+    error_stage: str | None = None,
+    error_message: str | None = None,
+) -> BatchMetrics:
+    """Build a BatchMetrics from pipeline data.
+
+    Maps _StageTimer keys to individual BatchMetrics timing fields.
+    Uses 0.0 for stages that did not execute.
+    """
+    return BatchMetrics(
+        batch_id=batch_id,
+        user_id=user_id,
+        status=status,
+        raw_audio_duration_seconds=raw_audio_duration_seconds,
+        speech_duration_seconds=speech_duration_seconds,
+        speech_ratio=speech_ratio,
+        processing_wall_time_seconds=wall_time,
+        queue_wait_time_seconds=queue_wait_time_seconds,
+        raw_audio_size_bytes=raw_audio_size_bytes,
+        cleaned_audio_size_bytes=cleaned_audio_size_bytes,
+        speechmatics_job_id=speechmatics_job_id,
+        speechmatics_cost_estimate=speechmatics_cost_estimate,
+        transcode_duration_seconds=stage_timings.get("transcode", 0.0),
+        vad_duration_seconds=stage_timings.get("vad", 0.0),
+        denoise_duration_seconds=stage_timings.get("denoise", 0.0),
+        asr_submit_duration_seconds=stage_timings.get("asr", 0.0),
+        asr_wait_duration_seconds=0.0,
+        post_process_duration_seconds=stage_timings.get("postprocess", 0.0),
+        retry_count=retry_count,
+        error_stage=error_stage,
+        error_message=error_message,
+    )
 
 
 def _build_completion_event(

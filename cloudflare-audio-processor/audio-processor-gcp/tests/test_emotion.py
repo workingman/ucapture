@@ -1,7 +1,10 @@
 """Tests for emotion analysis interface, GoogleNLEngine, and runner."""
 
 import json
+import sys
 from dataclasses import asdict
+from datetime import datetime
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,6 +15,13 @@ from audio_processor.emotion.interface import (
     EmotionSegment,
 )
 from audio_processor.utils.errors import EmotionAnalysisError, PipelineError
+
+# Mock google.cloud.language_v2 before importing GoogleNLEngine so tests
+# work without the google-cloud-language package installed.
+_mock_language_v2 = MagicMock()
+sys.modules.setdefault("google", MagicMock())
+sys.modules.setdefault("google.cloud", MagicMock())
+sys.modules.setdefault("google.cloud.language_v2", _mock_language_v2)
 
 
 # ---------------------------------------------------------------------------
@@ -142,3 +152,127 @@ class TestEmotionAnalysisError:
     def test_importable_and_raisable(self) -> None:
         with pytest.raises(EmotionAnalysisError):
             raise EmotionAnalysisError("test error", batch_id="b1")
+
+
+# ---------------------------------------------------------------------------
+# Sub-issue #33: GoogleNLEngine
+# ---------------------------------------------------------------------------
+
+
+def _make_segment(
+    speaker: str, words: list[tuple[str, float, float]]
+) -> TranscriptSegment:
+    """Helper to create a TranscriptSegment from word tuples."""
+    return TranscriptSegment(
+        speaker_label=speaker,
+        words=[
+            TranscriptWord(text=t, start_time=s, end_time=e, confidence=0.99)
+            for t, s, e in words
+        ],
+    )
+
+
+def _mock_sentiment(score: float, magnitude: float) -> MagicMock:
+    """Create a mock sentiment response from the Google NL API."""
+    sentiment = MagicMock()
+    sentiment.score = score
+    sentiment.magnitude = magnitude
+
+    response = MagicMock()
+    response.document_sentiment = sentiment
+    return response
+
+
+class TestGoogleNLEngine:
+    """Tests for GoogleNLEngine implementation."""
+
+    def _make_engine(self, client: MagicMock) -> "GoogleNLEngine":
+        """Create a GoogleNLEngine with an injected mock client."""
+        from audio_processor.emotion.google_nl import GoogleNLEngine
+
+        return GoogleNLEngine(client=client)
+
+    async def test_analysis_contains_score_and_magnitude(self) -> None:
+        mock_client = MagicMock()
+        mock_client.analyze_sentiment.return_value = _mock_sentiment(0.7, 0.5)
+
+        engine = self._make_engine(mock_client)
+        segments = [_make_segment("S1", [("hello", 0.0, 0.5)])]
+        result = await engine.analyze(segments)
+
+        assert len(result.segments) == 1
+        analysis = result.segments[0].analysis
+        assert isinstance(analysis["score"], float)
+        assert isinstance(analysis["magnitude"], float)
+        assert analysis["score"] == 0.7
+        assert analysis["magnitude"] == 0.5
+
+    async def test_multiple_segments_each_get_api_call(self) -> None:
+        mock_client = MagicMock()
+        mock_client.analyze_sentiment.side_effect = [
+            _mock_sentiment(0.3, 0.2),
+            _mock_sentiment(-0.5, 0.8),
+        ]
+
+        engine = self._make_engine(mock_client)
+        segments = [
+            _make_segment("S1", [("hello", 0.0, 0.5)]),
+            _make_segment("S2", [("world", 1.0, 1.5)]),
+        ]
+        result = await engine.analyze(segments)
+
+        assert len(result.segments) == 2
+        assert mock_client.analyze_sentiment.call_count == 2
+        assert result.segments[0].analysis["score"] == 0.3
+        assert result.segments[1].analysis["score"] == -0.5
+
+    async def test_provider_fields_correct(self) -> None:
+        mock_client = MagicMock()
+        mock_client.analyze_sentiment.return_value = _mock_sentiment(0.0, 0.0)
+
+        engine = self._make_engine(mock_client)
+        result = await engine.analyze(
+            [_make_segment("S1", [("test", 0.0, 0.5)])]
+        )
+
+        assert result.provider == "google-cloud-nl"
+        assert result.provider_version == "v2"
+        assert result.batch_id == ""
+
+    async def test_analyzed_at_is_valid_iso8601_utc(self) -> None:
+        mock_client = MagicMock()
+        mock_client.analyze_sentiment.return_value = _mock_sentiment(0.0, 0.0)
+
+        engine = self._make_engine(mock_client)
+        result = await engine.analyze(
+            [_make_segment("S1", [("test", 0.0, 0.5)])]
+        )
+
+        # Should parse without error and contain UTC info
+        parsed = datetime.fromisoformat(result.analyzed_at)
+        assert parsed.tzinfo is not None
+
+    async def test_api_exception_raises_emotion_analysis_error(self) -> None:
+        mock_client = MagicMock()
+        mock_client.analyze_sentiment.side_effect = RuntimeError("API down")
+
+        engine = self._make_engine(mock_client)
+        with pytest.raises(EmotionAnalysisError, match="API down"):
+            await engine.analyze(
+                [_make_segment("S1", [("test", 0.0, 0.5)])]
+            )
+
+    async def test_segment_text_built_from_words(self) -> None:
+        mock_client = MagicMock()
+        mock_client.analyze_sentiment.return_value = _mock_sentiment(0.1, 0.2)
+
+        engine = self._make_engine(mock_client)
+        segments = [
+            _make_segment("S1", [("hello", 0.0, 0.3), ("world", 0.4, 0.7)])
+        ]
+        result = await engine.analyze(segments)
+
+        assert result.segments[0].text == "hello world"
+        assert result.segments[0].start_seconds == 0.0
+        assert result.segments[0].end_seconds == 0.7
+        assert result.segments[0].speaker == "S1"

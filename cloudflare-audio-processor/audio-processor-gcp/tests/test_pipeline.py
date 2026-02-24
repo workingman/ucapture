@@ -1,0 +1,640 @@
+"""Tests for audio_processor.pipeline module."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from audio_processor.asr.interface import Transcript, TranscriptSegment, TranscriptWord
+from audio_processor.audio.denoise.interface import DenoiseResult
+from audio_processor.audio.transcode import TranscodeResult
+from audio_processor.audio.vad.interface import SpeechSegment, VADResult
+from audio_processor.emotion.interface import EmotionResult, EmotionSegment
+from audio_processor.pipeline import (
+    ProcessingResult,
+    _build_completion_event,
+    _determine_error_stage,
+    process_batch,
+)
+from audio_processor.utils.errors import ASRError, AudioFetchError, StorageError
+
+
+def _make_transcript() -> Transcript:
+    """Create a minimal valid Transcript for testing."""
+    return Transcript(
+        segments=[
+            TranscriptSegment(
+                speaker_label="Speaker 1",
+                words=[
+                    TranscriptWord(
+                        text="Hello",
+                        start_time=0.0,
+                        end_time=0.5,
+                        confidence=0.99,
+                    ),
+                    TranscriptWord(
+                        text="world",
+                        start_time=0.5,
+                        end_time=1.0,
+                        confidence=0.98,
+                    ),
+                ],
+            ),
+        ],
+        raw_response={"results": [{"type": "word", "alternatives": [{"content": "Hello"}]}]},
+    )
+
+
+def _make_vad_result(has_speech: bool = True) -> VADResult:
+    """Create a VADResult for testing."""
+    if has_speech:
+        return VADResult(
+            segments=[SpeechSegment(0, 16000, 0.0, 1.0)],
+            total_duration_seconds=2.0,
+            speech_duration_seconds=1.0,
+            speech_ratio=0.5,
+            output_path="/tmp/test_speech.wav",
+        )
+    return VADResult(
+        segments=[],
+        total_duration_seconds=2.0,
+        speech_duration_seconds=0.0,
+        speech_ratio=0.0,
+        output_path="/tmp/test_speech.wav",
+    )
+
+
+def _make_transcode_result() -> TranscodeResult:
+    """Create a TranscodeResult for testing."""
+    return TranscodeResult(
+        input_path="/tmp/recording.m4a",
+        output_path="/tmp/recording.wav",
+        input_size_bytes=100000,
+        output_size_bytes=320000,
+        duration_seconds=10.0,
+    )
+
+
+def _make_denoise_result() -> DenoiseResult:
+    """Create a DenoiseResult for testing."""
+    return DenoiseResult(
+        input_size_bytes=320000,
+        output_size_bytes=320000,
+        output_path="/tmp/cleaned.wav",
+    )
+
+
+def _make_emotion_result() -> EmotionResult:
+    """Create an EmotionResult for testing."""
+    return EmotionResult(
+        provider="google-cloud-nl",
+        provider_version="v2",
+        analyzed_at="2026-02-24T10:00:00Z",
+        batch_id="batch-123",
+        segments=[
+            EmotionSegment(
+                segment_index=0,
+                start_seconds=0.0,
+                end_seconds=1.0,
+                speaker="Speaker 1",
+                text="Hello world",
+                analysis={"sentiment": "positive", "score": 0.8},
+            ),
+        ],
+    )
+
+
+@pytest.fixture
+def mock_r2_client():
+    """Create a mock R2Client."""
+    client = MagicMock()
+    client.fetch_object.return_value = b"fake-audio-bytes"
+    client.put_object.return_value = None
+    return client
+
+
+@pytest.fixture
+def mock_d1_client():
+    """Create a mock D1Client."""
+    client = AsyncMock()
+    client.update_batch_status.return_value = None
+    client.publish_completion_event.return_value = None
+    return client
+
+
+class TestProcessBatchHappyPath:
+    """Tests for the happy path through process_batch()."""
+
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_happy_path_returns_completed(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Full happy path produces completed result with all artifacts."""
+        # Arrange
+        mock_transcode.return_value = _make_transcode_result()
+
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+
+        mock_insert_markers.return_value = "[00:00] Speaker 1: Hello world"
+        mock_run_emotion.return_value = _make_emotion_result()
+
+        # Mock file reads for store stage
+        mock_open_data = b"cleaned-wav-data"
+        with patch("builtins.open", create=True) as mock_open:
+            mock_open.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            # We need to handle multiple open() calls
+            file_mock_write = MagicMock()
+            file_mock_read = MagicMock()
+            file_mock_read.read.return_value = mock_open_data
+
+            call_count = [0]
+
+            def side_effect(path, mode="r"):
+                call_count[0] += 1
+                ctx = MagicMock()
+                if "w" in mode:
+                    ctx.__enter__ = MagicMock(return_value=file_mock_write)
+                else:
+                    ctx.__enter__ = MagicMock(return_value=file_mock_read)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test_pipeline"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+
+                # Act
+                result = await process_batch(
+                    batch_id="batch-123",
+                    user_id="user-1",
+                    r2_client=mock_r2_client,
+                    d1_client=mock_d1_client,
+                )
+
+        # Assert
+        assert result.status == "completed"
+        assert result.batch_id == "batch-123"
+        assert "transcript_formatted" in result.artifact_paths
+        assert "transcript_raw" in result.artifact_paths
+        assert "raw_audio" in result.artifact_paths
+        assert result.metrics.raw_audio_duration_seconds == 10.0
+        assert result.error is None
+
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_happy_path_publishes_completion_event(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Happy path publishes a completion event with status 'completed'."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+        mock_insert_markers.return_value = "Hello world"
+        mock_run_emotion.return_value = None
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+            file_mock.read.return_value = b"data"
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        mock_d1_client.publish_completion_event.assert_called_once()
+        event = mock_d1_client.publish_completion_event.call_args[0][0]
+        assert event["status"] == "completed"
+        assert event["batch_id"] == "batch-123"
+        assert event["user_id"] == "user-1"
+
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_stage_timings_recorded(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Stage timings are recorded in metrics."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+        mock_insert_markers.return_value = "text"
+        mock_run_emotion.return_value = None
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+            file_mock.read.return_value = b"data"
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                result = await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        timings = result.metrics.stage_timings
+        assert "fetch" in timings
+        assert "transcode" in timings
+        assert "vad" in timings
+        assert "denoise" in timings
+        assert "asr" in timings
+        assert "postprocess" in timings
+        assert "store" in timings
+
+
+class TestProcessBatchZeroSpeech:
+    """Tests for zero-speech batch handling."""
+
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_zero_speech_completes_with_empty_transcript(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Zero-speech batch completes with empty formatted transcript."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=False)
+        mock_get_vad.return_value = mock_vad_engine
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                result = await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        assert result.status == "completed"
+        assert result.metrics.speech_duration_seconds == 0.0
+        assert result.metrics.speech_ratio == 0.0
+        assert result.metrics.cleaned_audio_size_bytes == 0
+        assert "transcript_formatted" in result.artifact_paths
+        # No cleaned_audio for zero-speech
+        assert "cleaned_audio" not in result.artifact_paths
+        # No emotion for zero-speech
+        assert "transcript_emotion" not in result.artifact_paths
+
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_zero_speech_stores_empty_formatted_txt(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Zero-speech batch stores empty bytes as formatted.txt."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=False)
+        mock_get_vad.return_value = mock_vad_engine
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        # Verify put_object was called with empty bytes for formatted.txt
+        put_calls = mock_r2_client.put_object.call_args_list
+        formatted_call = [
+            c for c in put_calls if "formatted.txt" in str(c)
+        ]
+        assert len(formatted_call) == 1
+        assert formatted_call[0][0][1] == b""  # empty bytes
+
+
+class TestProcessBatchEmotionFailure:
+    """Tests for emotion failure graceful degradation."""
+
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_emotion_failure_still_completes(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Batch completes even if emotion analysis raises an exception."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+        mock_insert_markers.return_value = "formatted text"
+
+        # Emotion raises exception
+        mock_run_emotion.side_effect = RuntimeError("Emotion service down")
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+            file_mock.read.return_value = b"data"
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                result = await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        assert result.status == "completed"
+        assert "transcript_emotion" not in result.artifact_paths
+        assert result.error is None
+
+
+class TestProcessBatchFailure:
+    """Tests for pipeline failure handling."""
+
+    async def test_fetch_failure_returns_failed_result(
+        self, mock_r2_client, mock_d1_client
+    ):
+        """AudioFetchError during fetch returns failed result with error_stage."""
+        mock_r2_client.fetch_object.side_effect = AudioFetchError(
+            "Object not found", key="user-1/batch-123/audio/recording.m4a"
+        )
+
+        with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+            mock_tmpdir.return_value.__enter__ = MagicMock(
+                return_value="/tmp/test"
+            )
+            mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+            result = await process_batch(
+                "batch-123", "user-1", mock_r2_client, mock_d1_client
+            )
+
+        assert result.status == "failed"
+        assert result.error is not None
+        assert result.error.stage == "fetch"
+        assert "Object not found" in result.error.message
+
+    async def test_failure_updates_d1_with_error_fields(
+        self, mock_r2_client, mock_d1_client
+    ):
+        """Pipeline failure updates D1 with error_stage and error_message."""
+        mock_r2_client.fetch_object.side_effect = AudioFetchError(
+            "Not found", key="key"
+        )
+
+        with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+            mock_tmpdir.return_value.__enter__ = MagicMock(
+                return_value="/tmp/test"
+            )
+            mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+            await process_batch(
+                "batch-123", "user-1", mock_r2_client, mock_d1_client
+            )
+
+        mock_d1_client.update_batch_status.assert_called_once()
+        call_kwargs = mock_d1_client.update_batch_status.call_args[1]
+        assert call_kwargs["status"] == "failed"
+        assert call_kwargs["error_stage"] == "fetch"
+        assert "Not found" in call_kwargs["error_message"]
+
+    async def test_failure_publishes_failure_event(
+        self, mock_r2_client, mock_d1_client
+    ):
+        """Pipeline failure publishes completion event with status 'failed'."""
+        mock_r2_client.fetch_object.side_effect = AudioFetchError(
+            "Not found", key="key"
+        )
+
+        with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+            mock_tmpdir.return_value.__enter__ = MagicMock(
+                return_value="/tmp/test"
+            )
+            mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+            await process_batch(
+                "batch-123", "user-1", mock_r2_client, mock_d1_client
+            )
+
+        mock_d1_client.publish_completion_event.assert_called_once()
+        event = mock_d1_client.publish_completion_event.call_args[0][0]
+        assert event["status"] == "failed"
+        assert "error_message" in event
+
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_raw_audio_never_deleted_on_failure(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Raw audio R2 key is never passed to a delete operation on failure."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.side_effect = RuntimeError("VAD crashed")
+        mock_get_vad.return_value = mock_vad_engine
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                result = await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        assert result.status == "failed"
+        # Verify no delete_object calls were made on the R2 client
+        assert not hasattr(mock_r2_client, "delete_object") or \
+            not mock_r2_client.delete_object.called
+
+
+class TestDetermineErrorStage:
+    """Tests for _determine_error_stage helper."""
+
+    def test_first_incomplete_stage_returned(self):
+        """Returns the first stage not in timings."""
+        timings = {"fetch": 0.1, "transcode": 0.2}
+        exc = RuntimeError("fail")
+        assert _determine_error_stage(exc, timings) == "vad"
+
+    def test_no_timings_returns_fetch(self):
+        """With no timings, the first stage (fetch) is returned."""
+        assert _determine_error_stage(RuntimeError("fail"), {}) == "fetch"
+
+
+class TestBuildCompletionEvent:
+    """Tests for _build_completion_event helper."""
+
+    def test_completed_event_structure(self):
+        """Completed event has correct fields."""
+        event = _build_completion_event(
+            batch_id="b1",
+            user_id="u1",
+            status="completed",
+            artifact_paths={"raw_audio": "u1/b1/audio/recording.m4a"},
+        )
+        assert event["batch_id"] == "b1"
+        assert event["user_id"] == "u1"
+        assert event["status"] == "completed"
+        assert "published_at" in event
+        assert "error_message" not in event
+
+    def test_failed_event_includes_error_message(self):
+        """Failed event includes error_message field."""
+        event = _build_completion_event(
+            batch_id="b1",
+            user_id="u1",
+            status="failed",
+            artifact_paths={},
+            error_message="Speechmatics timeout",
+        )
+        assert event["error_message"] == "Speechmatics timeout"

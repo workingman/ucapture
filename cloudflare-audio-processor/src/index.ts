@@ -14,6 +14,8 @@ import { handleGetDownload } from './handlers/download.ts';
 import { handlePublishEvent } from './handlers/internal/publish-event.ts';
 import { handleGetPubSubCredentials } from './handlers/pubsub-credentials.ts';
 import { handleReprocess } from './handlers/internal/reprocess.ts';
+import { handleBatchStatus } from './handlers/internal/batch-status.ts';
+import { handleProcessingStages } from './handlers/internal/processing-stages.ts';
 
 const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
 
@@ -126,6 +128,12 @@ app.get('/v1/download/:batch_id/:artifact_type', handleGetDownload);
 
 /** GET /v1/pubsub/credentials -- MQTT connection details for persistent Pub/Sub sessions (OAuth auth) */
 app.get('/v1/pubsub/credentials', handleGetPubSubCredentials);
+
+/** POST /internal/batch-status -- GCP calls this to update batch status and metrics in D1 (internal-secret auth) */
+app.post('/internal/batch-status', handleBatchStatus);
+
+/** POST /internal/processing-stages -- GCP calls this to write per-stage timing data to D1 (internal-secret auth) */
+app.post('/internal/processing-stages', handleProcessingStages);
 
 /** POST /internal/publish-event -- GCP calls this to publish completion events to Pub/Sub (internal-secret auth) */
 app.post('/internal/publish-event', handlePublishEvent);

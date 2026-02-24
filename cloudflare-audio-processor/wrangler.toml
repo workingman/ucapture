@@ -27,3 +27,9 @@ queue = "audio-processing-priority"
 [[kv_namespaces]]
 binding = "TOKEN_CACHE"
 id = "placeholder-id"
+
+# Pub/Sub namespace for completion events (MQTT broker)
+# Cloudflare Pub/Sub is in beta and does not have standard wrangler.toml bindings.
+# PUBSUB_NAMESPACE must be configured via the Cloudflare dashboard or API.
+# The binding is typed in src/env.d.ts; during local dev it will be undefined.
+# See: https://developers.cloudflare.com/pub-sub/

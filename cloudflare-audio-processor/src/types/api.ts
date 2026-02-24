@@ -50,22 +50,6 @@ export interface BatchListResponse {
   readonly pagination: Pagination;
 }
 
-/** Batch summary used in list responses (same shape as StatusResponse). */
-export type BatchSummary = StatusResponse;
-
-/** Pagination metadata (alias for Pagination). */
-export type PaginationMeta = Pagination;
-
-/** Artifact map (re-export for API consumers). */
-export type ArtifactMap = ArtifactPaths;
-
-/** Batch processing metrics (non-null subset of StatusResponse fields). */
-export interface BatchMetrics {
-  readonly speech_duration_seconds: number | null;
-  readonly speech_ratio: number | null;
-  readonly speechmatics_cost_estimate?: number | null;
-}
-
 /** Standard error response body. */
 export interface ErrorResponse {
   readonly error: string;

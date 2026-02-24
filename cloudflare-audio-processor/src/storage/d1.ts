@@ -272,6 +272,39 @@ export async function insertBatchNotes(
   await db.batch(statements);
 }
 
+/** Input for inserting a processing stage timing row. */
+export interface ProcessingStageInput {
+  readonly stage: string;
+  readonly duration_seconds: number;
+  readonly success: boolean;
+  readonly error_message?: string | null;
+}
+
+/**
+ * Inserts per-stage timing rows into the processing_stages table.
+ *
+ * @param db - D1Database binding
+ * @param batchId - The batch ID to link stages to
+ * @param stages - Array of stage timing records
+ */
+export async function insertProcessingStages(
+  db: D1Database,
+  batchId: string,
+  stages: ProcessingStageInput[],
+): Promise<void> {
+  if (stages.length === 0) return;
+
+  const stmt = db.prepare(
+    `INSERT INTO processing_stages (batch_id, stage, started_at, duration_seconds, success, error_message) VALUES (?, ?, datetime('now'), ?, ?, ?)`,
+  );
+
+  const statements = stages.map((s) =>
+    stmt.bind(batchId, s.stage, s.duration_seconds, s.success ? 1 : 0, s.error_message ?? null),
+  );
+
+  await db.batch(statements);
+}
+
 /** Filter options for listing batches. */
 export interface ListBatchesFilter {
   readonly userId: string;

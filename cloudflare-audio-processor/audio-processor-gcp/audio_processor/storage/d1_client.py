@@ -209,9 +209,6 @@ class D1Client:
         if error_message is not None:
             payload["error_message"] = error_message
 
-        # TODO: Worker endpoint /internal/batch-metrics needs to be created.
-        # For now, we reuse /internal/batch-status which accepts arbitrary
-        # fields via UpdateBatchFields.
         url = f"{self.worker_url}/internal/batch-status"
         try:
             async with httpx.AsyncClient() as client:
@@ -264,9 +261,6 @@ class D1Client:
             "stages": stages,
         }
 
-        # TODO: Worker endpoint /internal/processing-stages needs to be
-        # created. This sends stage timing rows for the processing_stages
-        # table in D1.
         url = f"{self.worker_url}/internal/processing-stages"
         try:
             async with httpx.AsyncClient() as client:

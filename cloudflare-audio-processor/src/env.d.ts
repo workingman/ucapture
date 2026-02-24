@@ -30,4 +30,15 @@ export interface Env {
 
   /** R2 bucket name for S3-compatible presigned URL generation */
   readonly R2_BUCKET_NAME: string;
+
+  /** Shared secret for GCP -> Worker internal endpoint authentication */
+  readonly INTERNAL_SECRET: string;
+
+  /** Cloudflare Pub/Sub binding for publishing completion events */
+  readonly PUBSUB_NAMESPACE: {
+    publish(topic: string, message: string): Promise<void>;
+  };
+
+  /** MQTT broker URL for client credential responses */
+  readonly PUBSUB_BROKER_URL: string;
 }

@@ -11,6 +11,7 @@ import { AppError, PayloadTooLargeError } from './utils/errors.ts';
 import { handleGetStatus } from './handlers/status.ts';
 import { handleGetBatches } from './handlers/batches.ts';
 import { handleGetDownload } from './handlers/download.ts';
+import { handlePublishEvent } from './handlers/internal/publish-event.ts';
 
 const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
 
@@ -120,6 +121,9 @@ app.get('/v1/batches', handleGetBatches);
 
 /** GET /v1/download/:batch_id/:artifact_type -- presigned R2 URL redirect */
 app.get('/v1/download/:batch_id/:artifact_type', handleGetDownload);
+
+/** POST /internal/publish-event -- GCP calls this to publish completion events to Pub/Sub (internal-secret auth) */
+app.post('/internal/publish-event', handlePublishEvent);
 
 /** Logs R2 artifact paths that are now orphaned after a D1 failure. */
 function logOrphanedR2Artifacts(stored: StoredArtifacts, error: unknown): void {

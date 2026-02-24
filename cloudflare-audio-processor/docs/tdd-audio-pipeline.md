@@ -17,19 +17,34 @@
 | :--- | :--- | :--- | :--- |
 | **Ingest Runtime** | Cloudflare Workers | Edge deployment, free DDoS/WAF, 0-egress R2 integration, D1 proximity | AWS Lambda (higher cold start, egress fees), GCP Cloud Functions (no edge) |
 | **Ingest Language** | TypeScript | Type safety, Cloudflare Workers SDK native support, shared types with client | JavaScript (no type safety), Rust (steeper learning curve) |
-| **Processing Runtime** | GCP Cloud Run | Supports native binaries (Picovoice), scales to zero, pay-per-use | GCP Compute Engine (always-on cost), AWS Fargate (similar, but team prefers GCP) |
-| **Processing Language** | Python 3.11+ | First-class Picovoice SDK support, Speechmatics client library, simple deployment | Node.js (requires Python subprocess for Picovoice) |
+| **Processing Runtime** | GCP Cloud Run | Scales to zero, pay-per-use, supports native binaries if needed | GCP Compute Engine (always-on cost), AWS Fargate (similar, but team prefers GCP) |
+| **Processing Language** | Python 3.11+ | Speechmatics client library, ONNX Runtime for Silero VAD, simple deployment | Node.js (less mature ML/audio ecosystem) |
 | **Object Storage** | Cloudflare R2 | Zero egress fees (critical for GCP pulls), S3-compatible API, cheap storage ($0.015/GB/mo) | GCS (egress fees to Cloud Run), S3 (egress fees, no edge benefit) |
 | **Relational Index** | Cloudflare D1 | Serverless SQLite, low latency to Worker, sufficient for metadata scale (~10 users × 100 batches/day = 365K rows/year) | PostgreSQL on GCP (overkill, adds ops burden), Firestore (query limitations) |
 | **Job Queue** | Cloudflare Queues | Native Worker integration, automatic retries, FIFO + priority support | GCP Pub/Sub (adds cross-cloud complexity), SQS (not Cloudflare-native) |
 | **Event Stream** | Cloudflare Pub/Sub | MQTT-based, mobile-friendly, user-scoped topics. Offline delivery guaranteed via persistent sessions (`clean_session=false`, QoS 1) — broker queues messages while client is offline and delivers on reconnect. | Server-Sent Events (requires open HTTP connection), Polling (inefficient), Firebase FCM (external dependency, but better offline guarantee if Pub/Sub queue limits prove insufficient) |
 | **Authentication** | OAuth 2.0 (Google) | Leverages existing Google auth from Android app (already used for Drive), standard protocol, supports refresh tokens | Custom API keys (reinventing wheel), Auth0 (external cost) |
 | **ASR Engine** | Speechmatics Batch API | Chosen in PRD (high quality), speaker diarization, word timestamps | Whisper (slower, local compute cost), Deepgram (comparable, less familiar) |
-| **VAD** | Picovoice Cobra | Chosen in PRD, low latency, accurate silence trimming | WebRTC VAD (less accurate), Silero VAD (requires PyTorch, heavier) |
-| **Noise Suppression** | Picovoice Koala | Chosen in PRD, pairs with Cobra, optimized for voice | RNNoise (good but requires recompilation), Krisp SDK (paid, closed source) |
+| **VAD** | Silero VAD v6 (ONNX) | MIT license, $0 cost (replaces Picovoice Cobra ~$899/mo), ROC-AUC 0.94-0.98, processes 30 min audio in ~8s on CPU, only needs `onnxruntime` (~80 MB) + 2 MB model | Picovoice Cobra (excellent but ~$899/mo server license), WebRTC VAD (less accurate, unmaintained), pyannote-audio (excellent but 15-30 min for 30 min audio on CPU) |
+| **Noise Suppression** | None (removed) | Speech enhancement preprocessing degrades ASR accuracy by 1-47% WER per "When De-noising Hurts" (Dec 2024). Speechmatics is trained on noisy audio and has built-in audio filtering. Removing this stage simplifies the pipeline and avoids introducing artifacts that harm transcription. May revisit if A/B testing against Speechmatics shows benefit for specific noise profiles. | Picovoice Koala (~$899/mo bundled with Cobra), DTLN (MIT, fast, lightweight — best candidate if denoising proves needed), ClearerVoice MossFormerGAN (highest quality but needs PyTorch), DeepFilterNet (48kHz only, shown to degrade Whisper WER ~20%) |
 | **Emotion Analysis** | Google Cloud Natural Language API | Native GCP (same project as Cloud Run, no cross-cloud hop), text-based sentiment (score + magnitude per sentence), negligible cost (~$0.001/1K chars), trivial Python integration via `google-cloud-language` SDK | Hume AI (highest quality, audio + text, 48-dim prosody, but $0.064/min, no self-host); j-hartmann/emotion-english-distilroberta-base (free, self-hosted, 7-class categorical, ~250MB model, but lower accuracy on ambient speech); audeering/wav2vec2-large-robust (free self-hosted, dimensional arousal/valence/dominance from audio, requires GPU) |
 | **Schema Validation** | Zod | TypeScript-first, type inference, clear error messages | Joi (JS-only, no TS inference), AJV (JSON Schema, verbose) |
 | **Testing** | Vitest (Worker), pytest (Python) | Fast, Vite-native for Workers; pytest standard for Python | Jest (slower), Mocha (more config) |
+
+### Usage and Cost Benchmark (speculative)
+
+The following per-user usage estimate is speculative but represents a reasonable upper bound for planning purposes. Actual usage will vary significantly by user behavior and recording context.
+
+| Metric | Value | Notes |
+| :--- | :--- | :--- |
+| Speech per user per day | 6 hours | Post-VAD (speech only, silence trimmed). Upper bound estimate. |
+| Speech per user per month | 180 hours | 6 hrs × 30 days |
+| Speechmatics cost per user per month | ~$43 | 180 hrs × $0.24/hr (Pro tier) |
+| Speechmatics cost per user per month (volume) | ~$35 | With 20% volume discount above 500 hrs/month (applies at ~3+ users) |
+| Silero VAD cost | $0 | MIT license, no per-use fees |
+| Noise suppression cost | $0 | Removed from pipeline |
+
+At 10 users (~1,800 hrs/month), Speechmatics volume pricing applies: ~$370/month total (~$37/user).
 
 ---
 
@@ -1528,7 +1543,7 @@ migration.
 | **Cloudflare Pub/Sub MQTT auth complexity**: Android MQTT client integration may be more complex than anticipated | Medium | Medium | Prototype MQTT connection in Android app early (spike task). Ensure `clean_session=false` and QoS 1 are supported with Cloudflare's credential model. If too complex, fall back to FCM or polling `/v1/status`. |
 | **Cloudflare Pub/Sub offline queue limits**: Broker may drop messages after exceeding queue depth or retention TTL for long offline periods | Low | Medium | Confirm limits with Cloudflare docs/support (Open Question 6). If limits are insufficient, implement `GET /v1/batches` catch-up poll on reconnect as a safety net. |
 | **R2 → GCP bandwidth costs**: R2 egress is free, but GCP Cloud Run ingress may have quotas or unexpected costs | Low | Medium | Monitor GCP network ingress in early testing. R2 egress is explicitly zero-fee per Cloudflare docs. |
-| **Picovoice licensing**: Server license costs may be higher than estimated | Low | High | Confirm Picovoice server/Linux license pricing before purchasing. Budget $500-1000/month for unlimited processing (verify with vendor). |
+| **~~Picovoice licensing~~**: Resolved — Picovoice replaced by Silero VAD (MIT, $0) and noise suppression removed from pipeline. | N/A | N/A | No action needed. |
 | **Speechmatics latency**: Batch API may take minutes for long audio, blocking queue throughput | Medium | Medium | Set ASR timeout to 10 minutes (600s). If timeout common, explore Speechmatics Real-Time API (streaming) as alternative. |
 | **D1 query performance at scale**: 10 users × 100 batches/day = 365K rows/year. D1 indexes may degrade. | Low | Low | Current indexes (user_id, status, recording_started_at) should handle this scale. Monitor p95 query latency. If slow, add composite indexes or migrate to PostgreSQL. |
 | **GCP Cloud Run cold starts**: First request after idle may take 5-10s, delaying queue processing | Medium | Low | Enable Cloud Run minimum instances (min=1) to keep one instance warm. Cost: ~$10/month for always-on instance. |

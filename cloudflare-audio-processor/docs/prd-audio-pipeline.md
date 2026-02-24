@@ -27,8 +27,8 @@ Google Drive as disconnected files with no processing pipeline.
 
 - The Android recorder (uCapture) is MVP-complete with 107 passing tests, a
   robust upload system, and a well-defined metadata sidecar format.
-- The team has chosen Speechmatics for transcription quality, and Picovoice
-  Cobra/Koala for noise suppression — both evaluated and decided.
+- The team has chosen Speechmatics for transcription quality and Silero VAD v6
+  for voice activity detection — both evaluated and decided.
 - The existing Google Drive destination provides no processing, indexing, or
   downstream integration capability.
 
@@ -49,7 +49,7 @@ investment.
 
 | # | Decision | Rationale |
 | :-- | :--- | :--- |
-| D-1 | **Cloudflare for ingest, storage, and indexing; GCP for compute** | Picovoice SDKs need a native runtime (can't run in CF Workers). CF provides free WAF/DDoS, cheap storage (R2 zero egress), and simple DB (D1). |
+| D-1 | **Cloudflare for ingest, storage, and indexing; GCP for compute** | Audio processing (ffmpeg, ONNX inference, Speechmatics API) needs a general-purpose runtime. CF provides free WAF/DDoS, cheap storage (R2 zero egress), and simple DB (D1). |
 | D-2 | **MVP with platform bones** | Ship a working pipeline fast, but use the queue-driven CF↔GCP split from day one so the architecture doesn't need re-doing. |
 | D-3 | **Speechmatics for Automatic Speech Recognition (ASR), behind a modular interface** | Speechmatics is the chosen engine. Abstract behind an interface so swapping to Whisper, Deepgram, etc. is a config change, not a rewrite. |
 | D-4 | **Batch-oriented upload model** | Each upload is a "batch" containing one audio file, one metadata JSON, zero or more images, and zero or more text notes. All artifacts in a batch are linked. |
@@ -187,31 +187,40 @@ The system must expose an endpoint to query batch status.
 
 ### 3.4 Audio Processing
 
-**FR-030: Voice Activity Detection (Cobra)**
+**FR-030: Voice Activity Detection**
 The system must identify speech segments in the uploaded audio and discard
-non-speech portions.
+non-speech portions. The VAD engine is accessed through an abstraction layer
+(see FR-036) so the provider can be swapped via configuration.
 
 *Acceptance Criteria:*
 - Given a 30-minute audio file that is 80% silence, When VAD is applied, Then
   only the speech segments are passed to downstream processing.
-- Given a batch where Cobra detects zero speech, Then the batch is marked
+- Given a batch where VAD detects zero speech, Then the batch is marked
   `completed` with an empty transcript and no cleaned audio file.
 
-**FR-031: Noise Suppression (Koala)**
-The system must apply noise suppression to the speech segments identified by
-Cobra.
+**FR-031: Noise Suppression (configurable, disabled by default)**
+The pipeline includes a noise suppression stage accessed through an abstraction
+layer (see FR-037). The default configuration uses a null/passthrough engine
+that forwards audio unchanged, because speech enhancement preprocessing has
+been shown to degrade ASR accuracy (1-47% WER increase per "When De-noising
+Hurts", Dec 2024). Speechmatics is trained on noisy audio and has built-in
+audio filtering, making a separate denoise step unnecessary. The stage remains
+in the pipeline so a real denoise engine can be enabled via config if A/B
+testing against specific noise profiles shows benefit.
 
 *Acceptance Criteria:*
-- Given speech segments with background noise, When Koala processes them, Then
-  the output audio has reduced background noise while preserving speech
-  intelligibility.
+- Given the default configuration, When audio passes through the denoise stage,
+  Then the output audio is identical to the input (null passthrough).
+- Given a configuration with a real denoise engine enabled, When audio passes
+  through the denoise stage, Then the output audio has reduced background noise
+  while preserving speech intelligibility.
 
 **FR-032: Transcription with speaker diarization (Speechmatics)**
 The system must transcribe the cleaned audio using Speechmatics Batch API with
 speaker diarization enabled.
 
 *Acceptance Criteria:*
-- Given cleaned audio, When Speechmatics processes it, Then a transcript is
+- Given post-VAD audio, When Speechmatics processes it, Then a transcript is
   returned with speaker labels and inline timestamp markers at approximately
   15-second intervals.
 - Timestamp markers are produced by post-processing the Speechmatics
@@ -226,13 +235,10 @@ speaker diarization enabled.
   response is also preserved alongside the formatted text, to allow future
   reprocessing at finer granularity without re-submitting audio.
 
-*Note on emotional/sentiment evaluation:* Neither Speechmatics Batch API nor
-Koala provide per-utterance sentiment or emotion metadata as standard output.
-Koala is a noise suppressor only. Speechmatics returns transcription and
-diarization but no affective analysis. Prosodic or sentiment analysis would
-require a separate post-processing pass (e.g. LLM-based) applied to the stored
-transcript. This is out of scope for MVP; preserving the full raw Speechmatics
-response (above) ensures the data is available for it in future.
+*Note on emotional/sentiment evaluation:* Speechmatics Batch API does not
+provide per-utterance sentiment or emotion metadata. It returns transcription
+and diarization but no affective analysis. See FR-034 and FR-035 for the
+pluggable emotion analysis stage added downstream of transcription.
 
 **FR-033: Modular ASR interface**
 The transcription engine must be accessed through an abstraction layer.
@@ -292,6 +298,30 @@ varying schemas produced by different providers.
     — one of: anger, disgust, fear, joy, neutral, sadness, surprise
   - `audeering-wav2vec2`: `{ "arousal": float, "dominance": float,
     "valence": float }` — continuous dimensional scores from audio
+
+**FR-036: Modular VAD interface**
+The VAD engine must be accessed through an abstraction layer, following the same
+pattern as FR-033 for ASR and FR-035 for emotion.
+
+*Acceptance Criteria:*
+- Given a new VAD engine implementation, When it conforms to the interface, Then
+  it can replace the current VAD provider with a configuration change and no
+  code changes to the pipeline.
+- The interface must support a null/passthrough implementation that returns the
+  entire audio as a single speech segment, for use in testing or when VAD should
+  be bypassed.
+
+**FR-037: Modular noise suppression interface**
+The noise suppression engine must be accessed through an abstraction layer,
+following the same pattern as FR-033 for ASR and FR-035 for emotion.
+
+*Acceptance Criteria:*
+- Given a new denoise engine implementation, When it conforms to the interface,
+  Then it can replace the current provider with a configuration change and no
+  code changes to the pipeline.
+- The interface must support a null/passthrough implementation that copies the
+  input audio unchanged, for use when noise suppression is disabled (the default
+  configuration).
 
 ### 3.5 Orchestration
 
@@ -417,17 +447,17 @@ TC-11).
 
 | # | Constraint |
 | :-- | :--- |
-| TC-1 | Picovoice Cobra and Koala require a native runtime (Python/C). They cannot run in Cloudflare Workers. |
+| TC-1 | Audio processing (ffmpeg transcoding, ONNX VAD inference, Speechmatics API calls) requires a general-purpose runtime. These cannot run in Cloudflare Workers (30s CPU limit, no native binaries). |
 | TC-2 | Cloudflare Workers have a 30-second CPU time limit (paid plan). Audio DSP exceeds this. |
 | TC-3 | The Android app currently produces AAC/M4A at 44.1 kHz mono (64-256 kbps). The pipeline must accept this format. |
-| TC-4 | Picovoice SDKs require 16 kHz, single-channel, 16-bit PCM input (confirmed via Koala Python demo docs and shared `pv_sample_rate()`). Audio must be transcoded on GCP before Cobra/Koala processing — not on the phone, to minimize battery consumption (44.1 kHz AAC uses hardware-accelerated encoding on Android). |
-| TC-5 | Speechmatics Batch API accepts multiple formats including M4A. Cleaned audio format (post-Koala) must be compatible. |
+| TC-4 | Silero VAD requires 16 kHz, single-channel, 16-bit PCM input. Audio must be transcoded on GCP before VAD processing — not on the phone, to minimize battery consumption (44.1 kHz AAC uses hardware-accelerated encoding on Android). |
+| TC-5 | Speechmatics Batch API accepts multiple formats including M4A. Post-VAD audio format must be compatible. |
 | TC-6 | R2 has no egress fees. GCP Cloud Run will need to pull raw audio from R2 and push cleaned audio back. |
 | TC-7 | D1 is on a paid plan. The 10GB storage limit applies to the paid tier; metadata and index only — not audio content. This is sufficient for the expected data volume at scale. |
-| TC-8 | ~10 users recording up to 24x7. Cobra/Koala will substantially reduce stored audio volume, but ingest must handle the full raw volume. |
+| TC-8 | ~10 users recording up to 24x7. VAD will substantially reduce stored audio volume, but ingest must handle the full raw volume. |
 | TC-9 | Upload chunks are 5-30 minutes of audio. At 128 kbps AAC, that's ~5-22 MB per chunk. |
-| TC-10 | Picovoice requires an access key (licensed per platform). Server-side processing needs a server/Linux license. |
-| TC-11 | There is no requirement to remain within the free tier of any provider (Cloudflare, GCP, Speechmatics, Picovoice). Costs are expected to scale with usage. Cost management is handled through observability (FR-050), not through architectural constraints that sacrifice capability. |
+| ~~TC-10~~ | ~~Picovoice requires an access key (licensed per platform).~~ Removed — Picovoice dropped. Silero VAD is MIT-licensed ($0). |
+| TC-11 | There is no requirement to remain within the free tier of any provider (Cloudflare, GCP, Speechmatics). Costs are expected to scale with usage. Cost management is handled through observability (FR-050), not through architectural constraints that sacrifice capability. |
 
 ### Assumptions
 
@@ -436,7 +466,7 @@ TC-11).
 | A-1 | The existing uCapture metadata sidecar format (JSON with recording, location, and calendar sections) will be extended to include image and note references rather than replaced. |
 | A-2 | Images will be uploaded as binary attachments (JPEG/PNG) alongside the audio, not embedded in the metadata JSON. |
 | A-3 | Text notes will be included in the metadata JSON sidecar as a `notes` array (each entry: `timestamp` ISO 8601 + `text` string), alongside existing `recording`, `location`, and `calendar` keys. Images are binary and go as separate files in the multipart upload. |
-| A-4 | Speechmatics pricing is per hour of audio submitted. Cobra/Koala trimming directly reduces transcription cost. |
+| A-4 | Speechmatics pricing is per hour of audio submitted. VAD trimming directly reduces transcription cost. |
 
 ---
 
@@ -450,7 +480,15 @@ The sequence diagram shows the end-to-end flow:
 1. Phone uploads batch to Cloudflare Worker
 2. Worker stores artifacts in R2, indexes in D1, queues processing
 3. GCP Cloud Run picks up the job, pulls audio from R2
-4. Cobra → Koala → Speechmatics processing chain
+4. VAD (Silero) → Denoise (null/passthrough) → Speechmatics processing chain
 5. Emotion analysis pass (Google Cloud NL by default, best-effort)
 6. Results written back to R2, D1 updated
 7. Completion event emitted; Android app marks recording as processed
+
+---
+
+## Changelog
+
+| Date | Change | Feature Proposal |
+| :--- | :--- | :--- |
+| 2026-02-23 | **Drop Picovoice, add pluggable VAD/denoise interfaces.** Replaced Picovoice Cobra with Silero VAD v6 (MIT, $0). Removed Koala noise suppression (research shows enhancement degrades ASR WER). Added null/passthrough engines for both stages. Updated FR-030, FR-031, added FR-036 (modular VAD interface), FR-037 (modular denoise interface). Updated TC-1, TC-4, TC-5, TC-8, TC-11, removed TC-10, updated A-4, D-1 rationale. | [FP-001](fp-001-pluggable-vad-denoise.md) |

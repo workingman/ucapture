@@ -61,7 +61,7 @@ The system is divided into two **deployment units** connected by a queue and eve
 - **External Interfaces**: HTTPS (Android app), R2, D1, Cloudflare Queues, Cloudflare Pub/Sub
 
 **2. GCP Cloud Run (Processing)**
-- **Responsibilities**: Audio transcoding, VAD (Cobra), denoising (Koala), ASR (Speechmatics), emotion analysis (configurable provider), result storage
+- **Responsibilities**: Audio transcoding, VAD (Silero), ASR (Speechmatics), emotion analysis (configurable provider), result storage
 - **Deployment**: GCP Cloud Run service (`audio-processor-gcp`)
 - **Language**: Python 3.11
 - **External Interfaces**: Cloudflare Queues (consumer), R2 (fetch/store), D1 (status updates), Speechmatics API, Emotion Analysis API (Google Cloud NL, Hume AI, or self-hosted)
@@ -91,7 +91,7 @@ The system consists of three primary deployment units:
 
 **3. GCP Cloud Run (Processing)**
 - **Queue Consumer**: Receive jobs, update D1 status
-- **Audio Pipeline**: Fetch from R2, transcode (ffmpeg), Cobra VAD, Koala denoise, Speechmatics ASR
+- **Audio Pipeline**: Fetch from R2, transcode (ffmpeg), Silero VAD, Speechmatics ASR
 - **Result Writer**: Store cleaned audio + transcript to R2, update D1, trigger completion event
 - **External Integration**: Speechmatics Batch API (ASR + speaker diarization)
 
@@ -115,10 +115,9 @@ The system consists of three primary deployment units:
    - Updates D1: `status = "processing"`
    - Fetches `{user_id}/{batch_id}/raw-audio/recording.m4a` from R2
    - Transcodes M4A (44.1kHz AAC) → WAV (16kHz mono PCM)
-   - **Cobra VAD**: Identifies speech segments, discards silence
+   - **Silero VAD**: Identifies speech segments, discards silence
    - If no speech detected → skip to step 3 (empty transcript)
-   - **Koala**: Denoises speech segments
-   - Submits cleaned audio to **Speechmatics Batch API**
+   - Submits speech audio to **Speechmatics Batch API**
    - Waits for transcript (polls Speechmatics job status)
    - Post-processes transcript: walks word timestamps, inserts `[MM:SS]` markers every 15 seconds
    - **Emotion Analysis** (best-effort): submits sentence-level transcript segments to
@@ -214,7 +213,7 @@ CREATE TABLE batches (
   -- Audio metrics
   raw_audio_size_bytes INTEGER,
   raw_audio_duration_seconds REAL,
-  speech_duration_seconds REAL,      -- After Cobra VAD
+  speech_duration_seconds REAL,      -- After VAD
   speech_ratio REAL,                 -- speech / raw
   cleaned_audio_size_bytes INTEGER,
 
@@ -351,9 +350,9 @@ interface Metadata {
 
 [00:15] Speaker 2: Pretty good! We finished the API integration yesterday. The Speechmatics transcription quality is really impressive.
 
-[00:30] Speaker 1: That's great to hear. What about the noise suppression? Is Koala working well?
+[00:30] Speaker 1: That's great to hear. How's the transcription accuracy?
 
-[00:45] Speaker 2: Yeah, it's cutting out almost all the background noise. I tested it with traffic sounds and it still captured the speech clearly.
+[00:45] Speaker 2: Really solid. Even with some background noise, Speechmatics picks up the speech clearly. The VAD trimming helps too.
 
 [01:00] Speaker 1: Perfect. Let's schedule a demo for next week.
 ```
@@ -688,8 +687,8 @@ async def process_batch(batch_id: str, user_id: str) -> ProcessingResult:
     Raises:
         AudioFetchError: Failed to fetch audio from R2
         TranscodeError: Failed to transcode audio
-        VADError: Cobra VAD failed
-        DenoiseError: Koala processing failed
+        VADError: VAD engine processing failed
+        DenoiseError: Denoise engine processing failed
         ASRError: Speechmatics API error
         StorageError: Failed to write results to R2
     """
@@ -778,8 +777,20 @@ audio-processor-gcp/
 │   ├── audio/
 │   │   ├── __init__.py
 │   │   ├── transcode.py            # M4A → 16kHz WAV (ffmpeg wrapper)
-│   │   ├── vad.py                  # Picovoice Cobra integration
-│   │   └── denoise.py              # Picovoice Koala integration
+│   │   ├── wav_utils.py            # Shared WAV read/write helpers (DRY extraction)
+│   │   ├── vad/
+│   │   │   ├── __init__.py         # Re-exports VADEngine, VADResult, etc.
+│   │   │   ├── interface.py        # VADEngine ABC + SpeechSegment, VADResult
+│   │   │   ├── silero.py           # SileroVADEngine (ONNX)
+│   │   │   ├── null.py             # NullVADEngine (passthrough)
+│   │   │   ├── registry.py         # Engine registry + factory
+│   │   │   └── models/
+│   │   │       └── silero_vad.onnx # Vendored Silero VAD v6 model (~2 MB)
+│   │   └── denoise/
+│   │       ├── __init__.py         # Re-exports DenoiseEngine, DenoiseResult
+│   │       ├── interface.py        # DenoiseEngine ABC + DenoiseResult
+│   │       ├── null.py             # NullDenoiseEngine (passthrough)
+│   │       └── registry.py         # Engine registry + factory
 │   ├── asr/
 │   │   ├── __init__.py
 │   │   ├── interface.py            # Abstract ASR interface (modular)
@@ -807,11 +818,12 @@ audio-processor-gcp/
 │       └── errors.py               # Custom exception classes
 ├── tests/
 │   ├── test_transcode.py
-│   ├── test_vad.py
+│   ├── test_vad.py                 # VADEngine ABC contract + SileroVADEngine + NullVADEngine
+│   ├── test_denoise.py             # DenoiseEngine ABC contract + NullDenoiseEngine
 │   ├── test_speechmatics.py
 │   └── test_pipeline.py
 ├── Dockerfile                      # Multi-stage build (Python 3.11 + ffmpeg)
-├── requirements.txt                # picovoice, boto3, httpx, etc.
+├── requirements.txt                # onnxruntime, boto3, httpx, etc.
 ├── pyproject.toml                  # pytest, black, ruff config
 └── cloudbuild.yaml                 # GCP Cloud Build config
 ```
@@ -1098,11 +1110,19 @@ class SpeechmaticsEngine(ASREngine):
 ```python
 # audio_processor/pipeline.py
 async def process_batch(batch_id: str, user_id: str) -> ProcessingResult:
-    # ... transcode, VAD, denoise steps ...
+    # ... transcode step ...
+
+    # VAD (swappable via config)
+    vad_engine = get_vad_engine(config.vad_provider)  # "silero" | "null"
+    vad_result = vad_engine.process(transcoded_path, output_dir)
+
+    # Denoise (swappable via config — currently "null", denoising disabled)
+    denoise_engine = get_denoise_engine(config.denoise_provider)  # "null"
+    denoise_result = denoise_engine.process(vad_result.output_path, output_dir)
 
     # ASR (swappable via config)
     asr_engine = get_asr_engine(config.asr_provider)  # "speechmatics" | "whisper" | "deepgram"
-    transcript = await asr_engine.transcribe(cleaned_audio_path, metadata)
+    transcript = await asr_engine.transcribe(denoise_result.output_path, metadata)
 
     # Post-process (engine-agnostic)
     formatted_text = insert_timestamp_markers(transcript)
@@ -1523,6 +1543,124 @@ migration.
 
 ---
 
+### **Decision 9: Pluggable VAD/Denoise Engine Pattern**
+
+**Decision**: Define `VADEngine` and `DenoiseEngine` abstract base classes mirroring the existing `ASREngine` and `EmotionEngine` patterns. Ship with `SileroVADEngine`, `NullVADEngine`, and `NullDenoiseEngine`.
+
+**Rationale**:
+- Picovoice Cobra/Koala have been dropped (~$899/mo server license). Silero VAD v6 (MIT, $0) replaces Cobra. Denoising is removed (see Decision 10).
+- Pluggable interface enables future VAD/denoise providers to be swapped via config change, not code rewrite — same principle as ASR (Decision 4) and Emotion (Decision 8).
+- `NullVADEngine` and `NullDenoiseEngine` passthrough implementations allow bypassing either stage for testing or when the stage adds no value.
+
+**Guidance**:
+```python
+# audio_processor/audio/vad/interface.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+@dataclass
+class SpeechSegment:
+    start_sample: int
+    end_sample: int
+    start_seconds: float
+    end_seconds: float
+
+@dataclass
+class VADResult:
+    segments: list[SpeechSegment]
+    total_duration_seconds: float
+    speech_duration_seconds: float
+    speech_ratio: float
+    output_path: str
+
+class VADEngine(ABC):
+    @abstractmethod
+    def process(self, input_path: str, output_dir: str) -> VADResult:
+        """Detect speech segments and write speech-only output WAV.
+
+        Args:
+            input_path: Path to 16kHz mono 16-bit PCM WAV.
+            output_dir: Directory for the speech-only output WAV.
+
+        Returns:
+            VADResult with segments, durations, and output path.
+
+        Raises:
+            VADError: Processing failed.
+        """
+        pass
+```
+
+```python
+# audio_processor/audio/denoise/interface.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+@dataclass
+class DenoiseResult:
+    input_size_bytes: int
+    output_size_bytes: int
+    output_path: str
+
+class DenoiseEngine(ABC):
+    @abstractmethod
+    def process(self, input_path: str, output_dir: str) -> DenoiseResult:
+        """Apply noise suppression to audio.
+
+        Args:
+            input_path: Path to 16kHz mono 16-bit PCM WAV.
+            output_dir: Directory for the denoised output WAV.
+
+        Returns:
+            DenoiseResult with input/output sizes and output path.
+
+        Raises:
+            DenoiseError: Processing failed.
+        """
+        pass
+```
+
+**Registry Pattern** (mirrors emotion runner):
+```python
+# audio_processor/audio/vad/registry.py
+VAD_ENGINES = {
+    "silero": SileroVADEngine,
+    "null": NullVADEngine,
+}
+
+def get_vad_engine(provider: str, **kwargs) -> VADEngine:
+    engine_cls = VAD_ENGINES.get(provider)
+    if not engine_cls:
+        raise VADError(f"Unknown VAD provider: {provider}")
+    return engine_cls(**kwargs)
+```
+
+**Silero VAD v6 integration**:
+- Model: `silero_vad.onnx` (~2 MB), vendored in `audio_processor/audio/vad/models/`
+- Runtime: `onnxruntime.InferenceSession` (no PyTorch dependency)
+- Input: 16kHz 16-bit mono PCM WAV (matches transcode output)
+- Processing: 512-sample frames (32ms at 16kHz), returns speech probability per frame
+- Default threshold: 0.5 (configurable via `__init__`)
+- Performance: ~8 seconds for 30 minutes of audio on CPU
+
+---
+
+### **Decision 10: Noise Suppression Removal**
+
+**Decision**: Remove noise suppression from the default pipeline. Ship `NullDenoiseEngine` as the only implementation. The `DenoiseEngine` ABC is retained for future use.
+
+**Rationale**:
+- Research paper "When De-noising Hurts" (Dec 2024) demonstrates that speech enhancement preprocessing degrades ASR word error rate (WER) by 1-47% across tested systems.
+- Speechmatics is trained on noisy audio and includes built-in audio filtering — preprocessing with a separate denoiser introduces artifacts that harm transcription accuracy.
+- Removing this stage simplifies the pipeline, reduces processing time, and avoids a $0/month vs $899/month cost decision entirely.
+- The `DenoiseEngine` ABC and `NullDenoiseEngine` are retained so that if A/B testing later shows benefit for specific noise profiles, a real denoiser (e.g., DTLN or MossFormerGAN) can be added as a new engine class without pipeline changes.
+
+**Candidate denoiser (if ever needed)**:
+- **DTLN** (MIT, ONNX, fast) — best candidate for real-time or high-throughput
+- **ClearerVoice MossFormerGAN** (Apache 2.0) — highest quality but requires PyTorch
+
+---
+
 ## 7. Open Questions & PRD Gaps
 
 | # | Question | Impact | Proposed Resolution |
@@ -1581,7 +1719,9 @@ CLOUDFLARE_INTERNAL_SECRET=<...>
 
 SPEECHMATICS_API_KEY=<...>
 
-PICOVOICE_ACCESS_KEY=<...>
+VAD_PROVIDER=silero
+VAD_MODEL_PATH=audio_processor/audio/vad/models/silero_vad.onnx
+DENOISE_PROVIDER=null
 
 LOG_LEVEL=INFO
 ```
@@ -1599,7 +1739,8 @@ LOG_LEVEL=INFO
 
 **GCP Service** (pytest):
 - `test_transcode.py`: Validate ffmpeg command generation, 16kHz output
-- `test_vad.py`: Mock Cobra VAD, verify speech segment extraction
+- `test_vad.py`: VADEngine ABC contract enforcement, SileroVADEngine with mocked ONNX session, NullVADEngine passthrough behavior
+- `test_denoise.py`: DenoiseEngine ABC contract enforcement, NullDenoiseEngine passthrough (input copied unchanged to output)
 - `test_speechmatics.py`: Mock Speechmatics API, verify response parsing
 - `test_emotion.py`:
   - Mock Google NL API, verify `emotion.json` envelope structure and `provider` field
@@ -1659,4 +1800,53 @@ LOG_LEVEL=INFO
 
 ---
 
-*Last Updated: 2026-02-22*
+*Last Updated: 2026-02-23*
+
+---
+
+## Changelog
+
+### 2026-02-23 — FP-001: Pluggable VAD & Denoise Engines
+
+**Trigger:** Picovoice dropped (~$899/mo server license). Silero VAD v6 (MIT, $0) replaces Cobra. Noise suppression removed from pipeline per "When De-noising Hurts" research.
+
+**Section 1 (Technology Choices):** Updated in prior commit (7288d41).
+- VAD: Picovoice Cobra → Silero VAD v6 (ONNX)
+- Noise Suppression: Picovoice Koala → None (removed)
+- Processing Runtime/Language rationale updated
+- Usage and cost benchmark table added
+- Risk Register: Picovoice licensing row marked resolved
+
+**Section 2 (Architecture):**
+- GCP responsibilities: removed "denoising (Koala)", changed "VAD (Cobra)" → "VAD (Silero)"
+- Component boundaries: "Cobra VAD, Koala denoise" → "Silero VAD"
+- Data flow: removed Koala denoise step, "cleaned audio" → "speech audio" in Speechmatics submission
+
+**Section 3 (Data Models):**
+- D1 schema: `speech_duration_seconds` comment "After Cobra VAD" → "After VAD"
+- Transcript sample: replaced Koala/noise-suppression dialogue with transcription accuracy dialogue
+
+**Section 4.4 (Pipeline Interfaces):**
+- `process_batch()` docstring: "Cobra VAD failed" → "VAD engine processing failed", "Koala processing failed" → "Denoise engine processing failed"
+- Pipeline usage code: added `get_vad_engine()` and `get_denoise_engine()` calls, showing full engine-based pipeline flow
+
+**Section 5 (Directory Structure):**
+- `audio/vad.py` → `audio/vad/` package (interface, silero, null, registry, models/)
+- `audio/denoise.py` → `audio/denoise/` package (interface, null, registry)
+- Added `audio/wav_utils.py` (shared WAV I/O, DRY extraction)
+- Added `test_denoise.py` to test listing
+- `requirements.txt` comment: "picovoice" → "onnxruntime"
+
+**Section 6 (Key Decisions):**
+- Added Decision 9: Pluggable VAD/Denoise Engine Pattern (ABCs, registries, Silero integration details)
+- Added Decision 10: Noise Suppression Removal (rationale, research citation, future candidates)
+
+**Section 9 (Deployment):**
+- Removed `PICOVOICE_ACCESS_KEY` env var
+- Added `VAD_PROVIDER`, `VAD_MODEL_PATH`, `DENOISE_PROVIDER` env vars
+
+**Section 10 (Testing):**
+- `test_vad.py`: updated from "Mock Cobra VAD" to ABC contract + SileroVADEngine + NullVADEngine
+- Added `test_denoise.py`: ABC contract + NullDenoiseEngine
+
+**Cross-reference:** PRD updated in prior commit (7288d41). Feature proposal: `docs/fp-001-pluggable-vad-denoise.md`.

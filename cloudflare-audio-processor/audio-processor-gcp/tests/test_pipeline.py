@@ -18,6 +18,7 @@ from audio_processor.pipeline import (
     ProcessingResult,
     _build_batch_metrics,
     _build_completion_event,
+    _build_stage_rows,
     _determine_error_stage,
     process_batch,
 )
@@ -883,3 +884,171 @@ class TestMetricsIntegration:
 
         bm = mock_log_metrics.call_args[0][0]
         assert bm.queue_wait_time_seconds >= 0.0
+
+
+class TestBuildStageRows:
+    """Tests for _build_stage_rows helper (#37)."""
+
+    def test_maps_successful_stages_to_canonical_names(self):
+        """Stage rows use canonical names: transcode, vad, denoise, asr_submit, post_process."""
+        timings = {
+            "transcode": 2.1,
+            "vad": 0.8,
+            "denoise": 0.1,
+            "asr": 25.0,
+            "postprocess": 0.3,
+        }
+        rows = _build_stage_rows(timings)
+        names = [r["stage"] for r in rows]
+        assert "transcode" in names
+        assert "vad" in names
+        assert "denoise" in names
+        assert "asr_submit" in names
+        assert "post_process" in names
+
+    def test_stage_count_matches_executed_stages(self):
+        """Row count matches the number of stages in timings."""
+        timings = {"fetch": 0.5, "transcode": 2.0, "vad": 0.8}
+        rows = _build_stage_rows(timings)
+        assert len(rows) == 3
+
+    def test_failed_stage_has_success_false(self):
+        """Failed stages (sentinel keys) produce rows with success=False."""
+        timings = {"fetch": 0.5, "_transcode_failed": 1.2}
+        rows = _build_stage_rows(timings)
+        failed = [r for r in rows if r["stage"] == "transcode"]
+        assert len(failed) == 1
+        assert failed[0]["success"] is False
+        assert failed[0]["duration_seconds"] == 1.2
+
+    def test_all_durations_are_positive(self):
+        """All stage durations are positive floats."""
+        timings = {"fetch": 0.1, "transcode": 0.2, "asr": 5.0}
+        rows = _build_stage_rows(timings)
+        for row in rows:
+            assert row["duration_seconds"] > 0.0
+
+
+class TestD1MetricsFromPipeline:
+    """Tests for D1 metrics calls from pipeline completion path (#37)."""
+
+    @patch("audio_processor.pipeline.log_batch_metrics")
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_success_calls_update_batch_metrics(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_log_metrics,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Successful pipeline calls d1_client.update_batch_metrics."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+        mock_insert_markers.return_value = "text"
+        mock_run_emotion.return_value = None
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+            file_mock.read.return_value = b"data"
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        mock_d1_client.update_batch_metrics.assert_called_once()
+        call_kwargs = mock_d1_client.update_batch_metrics.call_args[1]
+        assert call_kwargs["batch_id"] == "batch-123"
+        assert call_kwargs["status"] == "completed"
+        assert call_kwargs["processing_wall_time_seconds"] > 0.0
+
+    @patch("audio_processor.pipeline.log_batch_metrics")
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_success_calls_insert_processing_stages(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_log_metrics,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Successful pipeline calls d1_client.insert_processing_stages."""
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+        mock_insert_markers.return_value = "text"
+        mock_run_emotion.return_value = None
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+            file_mock.read.return_value = b"data"
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                await process_batch(
+                    "batch-123", "user-1", mock_r2_client, mock_d1_client
+                )
+
+        mock_d1_client.insert_processing_stages.assert_called_once()
+        call_kwargs = mock_d1_client.insert_processing_stages.call_args[1]
+        assert call_kwargs["batch_id"] == "batch-123"
+        stages = call_kwargs["stages"]
+        # At least fetch, transcode, vad, denoise, asr, postprocess, emotion, store
+        assert len(stages) >= 8

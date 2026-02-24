@@ -163,7 +163,7 @@ async def process_batch(
         # Determine retry count from the exception if available
         retry_count = getattr(exc, "_retry_count", 0)
 
-        # Update D1 with failure status
+        # Update D1 with failure status and partial metrics
         try:
             await d1_client.update_batch_status(
                 batch_id=batch_id,
@@ -171,6 +171,19 @@ async def process_batch(
                 error_stage=current_stage,
                 error_message=error_message,
                 retry_count=retry_count,
+            )
+            await d1_client.update_batch_metrics(
+                batch_id=batch_id,
+                status="failed",
+                processing_wall_time_seconds=wall_time,
+                error_stage=current_stage,
+                error_message=error_message,
+                retry_count=retry_count,
+            )
+            stage_rows = _build_stage_rows(stage_timings)
+            await d1_client.insert_processing_stages(
+                batch_id=batch_id,
+                stages=stage_rows,
             )
         except Exception:
             logger.error(
@@ -400,12 +413,29 @@ async def _run_pipeline(
             stage_timings=stage_timings,
         )
 
-        # Stage 9: Update D1 with completion status
+        # Stage 9: Update D1 with completion status and metrics
         with _StageTimer("d1_update", stage_timings):
             await d1_client.update_batch_status(
                 batch_id=batch_id,
                 status="completed",
                 artifact_paths=artifact_paths,
+            )
+            await d1_client.update_batch_metrics(
+                batch_id=batch_id,
+                status="completed",
+                processing_wall_time_seconds=wall_time,
+                raw_audio_duration_seconds=raw_duration,
+                speech_duration_seconds=speech_duration,
+                speech_ratio=speech_ratio,
+                raw_audio_size_bytes=raw_audio_size_bytes,
+                cleaned_audio_size_bytes=cleaned_audio_size,
+                speechmatics_job_id=speechmatics_job_id,
+                speechmatics_cost_estimate=speechmatics_cost,
+            )
+            stage_rows = _build_stage_rows(stage_timings)
+            await d1_client.insert_processing_stages(
+                batch_id=batch_id,
+                stages=stage_rows,
             )
 
         # Stage 10: Publish completion event
@@ -483,12 +513,24 @@ async def _handle_zero_speech(
         stage_timings=stage_timings,
     )
 
-    # Update D1 with completion
+    # Update D1 with completion and metrics
     with _StageTimer("d1_update", stage_timings):
         await d1_client.update_batch_status(
             batch_id=batch_id,
             status="completed",
             artifact_paths=artifact_paths,
+        )
+        await d1_client.update_batch_metrics(
+            batch_id=batch_id,
+            status="completed",
+            processing_wall_time_seconds=wall_time,
+            raw_audio_duration_seconds=raw_duration,
+            raw_audio_size_bytes=raw_audio_size_bytes,
+        )
+        stage_rows = _build_stage_rows(stage_timings)
+        await d1_client.insert_processing_stages(
+            batch_id=batch_id,
+            stages=stage_rows,
         )
 
     # Publish completion event
@@ -561,6 +603,51 @@ def _determine_error_stage(
         return type(exc).__name__.lower().replace("error", "")
 
     return "unknown"
+
+
+def _build_stage_rows(
+    stage_timings: dict[str, float],
+) -> list[dict[str, Any]]:
+    """Convert _StageTimer timings dict to processing_stages rows.
+
+    Maps internal stage names to the canonical stage names used in D1:
+    transcode, vad, denoise, asr_submit, asr_wait, post_process.
+    Failed stages (prefixed with underscore) are included with
+    success=False.
+
+    Returns:
+        List of dicts with stage, duration_seconds, success, error_message.
+    """
+    # Map pipeline stage keys to D1 canonical names
+    stage_name_map = {
+        "transcode": "transcode",
+        "vad": "vad",
+        "denoise": "denoise",
+        "asr": "asr_submit",
+        "postprocess": "post_process",
+    }
+
+    rows: list[dict[str, Any]] = []
+    for key, duration in stage_timings.items():
+        # Handle failed stage sentinel keys (e.g., "_fetch_failed")
+        if key.startswith("_") and key.endswith("_failed"):
+            raw_name = key[1:].replace("_failed", "")
+            canonical = stage_name_map.get(raw_name, raw_name)
+            rows.append({
+                "stage": canonical,
+                "duration_seconds": duration,
+                "success": False,
+                "error_message": None,
+            })
+        else:
+            canonical = stage_name_map.get(key, key)
+            rows.append({
+                "stage": canonical,
+                "duration_seconds": duration,
+                "success": True,
+                "error_message": None,
+            })
+    return rows
 
 
 def _build_batch_metrics(

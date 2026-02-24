@@ -276,3 +276,138 @@ class TestGoogleNLEngine:
         assert result.segments[0].start_seconds == 0.0
         assert result.segments[0].end_seconds == 0.7
         assert result.segments[0].speaker == "S1"
+
+
+# ---------------------------------------------------------------------------
+# Sub-issue #34: Emotion runner with provider registry
+# ---------------------------------------------------------------------------
+
+
+from dataclasses import dataclass as _dataclass
+from unittest.mock import AsyncMock, patch
+
+from audio_processor.asr.interface import Transcript
+from audio_processor.emotion.runner import run_emotion_analysis
+
+
+@_dataclass
+class _FakeConfig:
+    """Minimal config object for testing the runner."""
+
+    emotion_provider: str | None = None
+
+
+def _make_transcript(
+    segments: list[TranscriptSegment] | None = None,
+) -> Transcript:
+    """Create a Transcript with the given segments."""
+    return Transcript(segments=segments or [], raw_response={})
+
+
+class TestEmotionRunner:
+    """Tests for run_emotion_analysis runner function."""
+
+    async def test_registered_provider_returns_result(self) -> None:
+        mock_result = EmotionResult(
+            provider="google-cloud-nl",
+            provider_version="v2",
+            analyzed_at="2026-01-01T00:00:00Z",
+            batch_id="",
+            segments=[
+                EmotionSegment(
+                    segment_index=0,
+                    start_seconds=0.0,
+                    end_seconds=0.5,
+                    speaker="S1",
+                    text="hello",
+                    analysis={"score": 0.5, "magnitude": 0.3},
+                ),
+            ],
+        )
+        mock_engine = AsyncMock()
+        mock_engine.analyze.return_value = mock_result
+
+        with patch(
+            "audio_processor.emotion.runner.EMOTION_ENGINES",
+            {"google-cloud-nl": MagicMock(return_value=mock_engine)},
+        ):
+            transcript = _make_transcript(
+                [_make_segment("S1", [("hello", 0.0, 0.5)])]
+            )
+            config = _FakeConfig(emotion_provider="google-cloud-nl")
+            result = await run_emotion_analysis(transcript, None, config)
+
+        assert result is not None
+        assert result.provider == "google-cloud-nl"
+        assert len(result.segments) == 1
+
+    async def test_empty_segments_returns_result_with_empty_list(self) -> None:
+        with patch(
+            "audio_processor.emotion.runner.EMOTION_ENGINES",
+            {"google-cloud-nl": MagicMock(return_value=MagicMock(
+                provider_name="google-cloud-nl",
+                provider_version="v2",
+            ))},
+        ):
+            transcript = _make_transcript([])
+            config = _FakeConfig(emotion_provider="google-cloud-nl")
+            result = await run_emotion_analysis(transcript, None, config)
+
+        assert result is not None
+        assert result.segments == []
+        assert result.provider == "google-cloud-nl"
+
+    async def test_engine_exception_returns_none(self) -> None:
+        mock_engine = AsyncMock()
+        mock_engine.analyze.side_effect = RuntimeError("boom")
+
+        with patch(
+            "audio_processor.emotion.runner.EMOTION_ENGINES",
+            {"google-cloud-nl": MagicMock(return_value=mock_engine)},
+        ):
+            transcript = _make_transcript(
+                [_make_segment("S1", [("test", 0.0, 0.5)])]
+            )
+            config = _FakeConfig(emotion_provider="google-cloud-nl")
+            result = await run_emotion_analysis(transcript, None, config)
+
+        assert result is None
+
+    async def test_unknown_provider_returns_none(self) -> None:
+        transcript = _make_transcript(
+            [_make_segment("S1", [("test", 0.0, 0.5)])]
+        )
+        config = _FakeConfig(emotion_provider="nonexistent-provider")
+        result = await run_emotion_analysis(transcript, None, config)
+
+        assert result is None
+
+    async def test_none_provider_returns_none(self) -> None:
+        transcript = _make_transcript(
+            [_make_segment("S1", [("test", 0.0, 0.5)])]
+        )
+        config = _FakeConfig(emotion_provider=None)
+        result = await run_emotion_analysis(transcript, None, config)
+
+        assert result is None
+
+    async def test_empty_string_provider_returns_none(self) -> None:
+        transcript = _make_transcript(
+            [_make_segment("S1", [("test", 0.0, 0.5)])]
+        )
+        config = _FakeConfig(emotion_provider="")
+        result = await run_emotion_analysis(transcript, None, config)
+
+        assert result is None
+
+    async def test_unknown_provider_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            transcript = _make_transcript(
+                [_make_segment("S1", [("test", 0.0, 0.5)])]
+            )
+            config = _FakeConfig(emotion_provider="unknown-thing")
+            await run_emotion_analysis(transcript, None, config)
+
+        assert "Unknown emotion provider" in caplog.text

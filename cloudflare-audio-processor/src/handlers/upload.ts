@@ -10,6 +10,13 @@ import type { Env } from '../env.d.ts';
 import { MetadataSchema, type Metadata } from '../utils/validation.ts';
 import { ValidationError } from '../utils/errors.ts';
 import type { BatchPriority } from '../types/batch.ts';
+import { generateBatchId } from '../utils/batch-id.ts';
+import {
+  buildAudioPath,
+  buildMetadataPath,
+  buildImagePath,
+  buildNotesPath,
+} from '../storage/r2.ts';
 
 /** Maximum audio file size: 50 MB. */
 const MAX_AUDIO_SIZE_BYTES = 50 * 1024 * 1024;
@@ -225,4 +232,58 @@ function getFileExtension(filename: string): string {
   const lastDot = filename.lastIndexOf('.');
   if (lastDot === -1) return '';
   return filename.slice(lastDot).toLowerCase();
+}
+
+/** R2 paths for all stored artifacts. */
+export interface StoredArtifacts {
+  readonly batchId: string;
+  readonly audioPath: string;
+  readonly metadataPath: string;
+  readonly imagePaths: string[];
+  readonly notesPath: string | null;
+}
+
+/**
+ * Stores all upload artifacts to R2 and returns the paths.
+ *
+ * Audio is streamed via ReadableStream to avoid buffering.
+ * Metadata and notes are stored as text.
+ *
+ * @param bucket - R2 bucket binding
+ * @param userId - Authenticated user's Google sub claim
+ * @param parsed - Validated upload data from parseUpload
+ * @returns Paths of all stored artifacts and the generated batch ID
+ */
+export async function storeArtifacts(
+  bucket: R2Bucket,
+  userId: string,
+  parsed: ParsedUpload,
+): Promise<StoredArtifacts> {
+  const batchId = generateBatchId(parsed.metadata.recording.started_at);
+
+  // Stream audio to R2 (avoids buffering large files)
+  const audioPath = buildAudioPath(userId, batchId);
+  await bucket.put(audioPath, parsed.audio.stream());
+
+  // Store metadata JSON as text
+  const metadataPath = buildMetadataPath(userId, batchId);
+  await bucket.put(metadataPath, parsed.metadataText);
+
+  // Store images
+  const imagePaths: string[] = [];
+  for (let i = 0; i < parsed.images.length; i++) {
+    const image = parsed.images[i];
+    const imagePath = buildImagePath(userId, batchId, i, image.name);
+    await bucket.put(imagePath, image.stream());
+    imagePaths.push(imagePath);
+  }
+
+  // Store notes as separate JSON if present in metadata
+  let notesPath: string | null = null;
+  if (parsed.metadata.notes && parsed.metadata.notes.length > 0) {
+    notesPath = buildNotesPath(userId, batchId);
+    await bucket.put(notesPath, JSON.stringify(parsed.metadata.notes));
+  }
+
+  return { batchId, audioPath, metadataPath, imagePaths, notesPath };
 }

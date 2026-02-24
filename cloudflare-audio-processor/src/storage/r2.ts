@@ -108,6 +108,31 @@ export function parseR2Path(path: string): ParsedR2Path {
   };
 }
 
+/** Convenience: builds the R2 path for raw audio. */
+export function buildAudioPath(userId: string, batchId: string): string {
+  return buildR2Path(userId, batchId, 'raw-audio', 'recording.m4a');
+}
+
+/** Convenience: builds the R2 path for metadata JSON. */
+export function buildMetadataPath(userId: string, batchId: string): string {
+  return buildR2Path(userId, batchId, 'metadata', 'metadata.json');
+}
+
+/** Convenience: builds the R2 path for an image by index. */
+export function buildImagePath(
+  userId: string,
+  batchId: string,
+  index: number,
+  filename: string,
+): string {
+  return buildR2Path(userId, batchId, 'images', `${index}-${filename}`);
+}
+
+/** Convenience: builds the R2 path for notes JSON. */
+export function buildNotesPath(userId: string, batchId: string): string {
+  return buildR2Path(userId, batchId, 'notes', 'notes.json');
+}
+
 /** Validates that a path segment is non-empty and contains no path traversal. */
 function validateSegment(value: string, name: string): void {
   if (!value || value.trim() === '') {

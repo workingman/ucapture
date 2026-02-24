@@ -1,7 +1,11 @@
 import { Hono } from 'hono';
 import type { Env } from './env.d.ts';
+import { authMiddleware } from './auth/middleware.ts';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
+
+/** Apply auth middleware to all /v1/* routes. */
+app.use('/v1/*', authMiddleware);
 
 /** POST /v1/upload -- multipart upload (audio + metadata + images + notes) */
 app.post('/v1/upload', (c) => {

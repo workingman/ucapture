@@ -271,3 +271,84 @@ export async function insertBatchNotes(
 
   await db.batch(statements);
 }
+
+/** Filter options for listing batches. */
+export interface ListBatchesFilter {
+  readonly userId: string;
+  readonly status?: string;
+  readonly startDate?: string;
+  readonly endDate?: string;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/**
+ * Lists batches for a user with optional filtering, pagination, and ordering.
+ *
+ * @param db - D1Database binding
+ * @param filter - Filter and pagination options
+ * @returns Array of batch rows matching the filter
+ */
+export async function listBatches(
+  db: D1Database,
+  filter: ListBatchesFilter,
+): Promise<BatchRow[]> {
+  const { sql, bindings } = buildListQuery(filter, false);
+  const result = await db.prepare(sql).bind(...bindings).all<BatchRow>();
+  return result.results ?? [];
+}
+
+/**
+ * Counts total batches matching the filter (for pagination metadata).
+ *
+ * @param db - D1Database binding
+ * @param filter - Filter options (limit/offset ignored for counting)
+ * @returns Total number of matching batches
+ */
+export async function countBatches(
+  db: D1Database,
+  filter: ListBatchesFilter,
+): Promise<number> {
+  const { sql, bindings } = buildListQuery(filter, true);
+  const result = await db.prepare(sql).bind(...bindings).first<{ count: number }>();
+  return result?.count ?? 0;
+}
+
+/** Builds the SQL and bindings for list/count queries with dynamic WHERE clauses. */
+function buildListQuery(
+  filter: ListBatchesFilter,
+  countOnly: boolean,
+): { sql: string; bindings: unknown[] } {
+  const conditions: string[] = ['user_id = ?'];
+  const bindings: unknown[] = [filter.userId];
+
+  if (filter.status) {
+    conditions.push('status = ?');
+    bindings.push(filter.status);
+  }
+
+  if (filter.startDate) {
+    conditions.push('recording_started_at >= ?');
+    bindings.push(filter.startDate);
+  }
+
+  if (filter.endDate) {
+    conditions.push('recording_started_at <= ?');
+    bindings.push(filter.endDate);
+  }
+
+  const where = conditions.join(' AND ');
+
+  if (countOnly) {
+    return {
+      sql: `SELECT COUNT(*) AS count FROM batches WHERE ${where}`,
+      bindings,
+    };
+  }
+
+  bindings.push(filter.limit, filter.offset);
+  return {
+    sql: `SELECT * FROM batches WHERE ${where} ORDER BY recording_started_at DESC LIMIT ? OFFSET ?`,
+    bindings,
+  };
+}

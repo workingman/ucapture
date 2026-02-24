@@ -78,3 +78,28 @@ export const MetadataSchema = z.object({
 
 /** Inferred TypeScript type from the Zod MetadataSchema. */
 export type Metadata = z.infer<typeof MetadataSchema>;
+
+/** Valid batch statuses for query filtering. */
+const batchStatusEnum = z.enum(['uploaded', 'processing', 'completed', 'failed']);
+
+/**
+ * Zod schema for GET /v1/batches query parameters.
+ *
+ * All fields are optional strings from the URL; numeric fields are coerced.
+ */
+export const BatchListQuerySchema = z.object({
+  status: batchStatusEnum.optional(),
+  start_date: z.string().refine(
+    (val) => !isNaN(new Date(val).getTime()),
+    { message: 'start_date must be a valid ISO 8601 date string' },
+  ).optional(),
+  end_date: z.string().refine(
+    (val) => !isNaN(new Date(val).getTime()),
+    { message: 'end_date must be a valid ISO 8601 date string' },
+  ).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/** Inferred TypeScript type from BatchListQuerySchema. */
+export type BatchListQuery = z.infer<typeof BatchListQuerySchema>;

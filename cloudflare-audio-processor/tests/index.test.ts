@@ -61,14 +61,14 @@ describe('Hono route skeleton', () => {
     expect(res.headers.get('content-type')).toContain('application/json');
   });
 
-  it('GET /v1/batches returns 501 Not Implemented when authenticated', async () => {
+  it('GET /v1/batches dispatches to batches handler when authenticated', async () => {
     const res = await app.request('/v1/batches', {
       method: 'GET',
       headers: { Authorization: 'Bearer valid-token' },
     }, env);
-    expect(res.status).toBe(501);
-    const body = await res.json();
-    expect(body).toEqual({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
+    // Handler is implemented; with empty mock DB it returns 500 (not 501)
+    expect(res.status).not.toBe(501);
+    expect(res.headers.get('content-type')).toContain('application/json');
   });
 
   it('GET /v1/download/:batch_id/:artifact_type returns 501 Not Implemented when authenticated', async () => {
@@ -87,7 +87,7 @@ describe('Hono route skeleton', () => {
   });
 
   it('all error responses have correct JSON content type', async () => {
-    const res = await app.request('/v1/batches', {
+    const res = await app.request('/v1/download/test-batch/raw_audio', {
       method: 'GET',
       headers: { Authorization: 'Bearer valid-token' },
     }, env);

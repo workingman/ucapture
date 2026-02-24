@@ -1,6 +1,5 @@
 # Audio processing
-pvkoala>=2.0.0
-pvcobra>=2.0.0
+onnxruntime>=1.17.0
 
 # Storage and HTTP
 boto3>=1.34.0

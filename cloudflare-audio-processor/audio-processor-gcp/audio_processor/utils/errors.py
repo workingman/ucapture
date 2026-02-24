@@ -42,7 +42,7 @@ class TranscodeError(PipelineError):
 
 
 class VADError(PipelineError):
-    """Raised when Picovoice Cobra voice activity detection fails."""
+    """Raised when voice activity detection fails."""
 
     def __init__(
         self,
@@ -55,7 +55,7 @@ class VADError(PipelineError):
 
 
 class DenoiseError(PipelineError):
-    """Raised when Picovoice Koala noise suppression fails."""
+    """Raised when noise suppression fails."""
 
     def __init__(
         self,

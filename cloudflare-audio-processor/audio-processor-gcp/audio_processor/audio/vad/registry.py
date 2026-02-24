@@ -6,9 +6,11 @@ instantiate an engine by name with engine-specific configuration.
 
 from audio_processor.audio.vad.interface import VADEngine
 from audio_processor.audio.vad.null import NullVADEngine
+from audio_processor.audio.vad.silero import SileroVADEngine
 from audio_processor.utils.errors import VADError
 
 VAD_ENGINES: dict[str, type[VADEngine]] = {
+    "silero": SileroVADEngine,
     "null": NullVADEngine,
 }
 

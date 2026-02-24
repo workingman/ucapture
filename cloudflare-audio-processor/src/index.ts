@@ -8,6 +8,7 @@ import { enqueueProcessingJob, buildProcessingJob } from './queue/publisher.ts';
 import type { UploadResponse } from './types/api.ts';
 import type { BatchImageInput, BatchNoteInput } from './storage/d1.ts';
 import { AppError, PayloadTooLargeError } from './utils/errors.ts';
+import { handleGetStatus } from './handlers/status.ts';
 
 const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
 
@@ -110,9 +111,7 @@ app.onError((error, c) => {
 });
 
 /** GET /v1/status/:batch_id -- batch status query (user-scoped) */
-app.get('/v1/status/:batch_id', (c) => {
-  return c.json({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' }, 501);
-});
+app.get('/v1/status/:batch_id', handleGetStatus);
 
 /** GET /v1/batches -- list batches (paginated, filterable) */
 app.get('/v1/batches', (c) => {

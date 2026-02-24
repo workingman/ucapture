@@ -147,6 +147,50 @@ export async function getBatchById(
 }
 
 /**
+ * Fetches a batch by ID without user scoping.
+ * Used when the caller needs to distinguish 404 (not found) from 403 (wrong user).
+ *
+ * @param db - D1Database binding
+ * @param batchId - The batch ID to look up
+ * @returns The batch row, or null if not found
+ */
+export async function findBatchById(
+  db: D1Database,
+  batchId: string,
+): Promise<BatchRow | null> {
+  const sql = `SELECT * FROM batches WHERE id = ?`;
+
+  const result = await db.prepare(sql).bind(batchId).first<BatchRow>();
+  return result ?? null;
+}
+
+/** Row shape returned by D1 for the batch_images table. */
+export interface BatchImageRow {
+  readonly id: number;
+  readonly batch_id: string;
+  readonly r2_path: string;
+  readonly captured_at: string | null;
+  readonly size_bytes: number | null;
+}
+
+/**
+ * Fetches all images associated with a batch.
+ *
+ * @param db - D1Database binding
+ * @param batchId - The batch ID to look up images for
+ * @returns Array of image rows
+ */
+export async function getBatchImages(
+  db: D1Database,
+  batchId: string,
+): Promise<BatchImageRow[]> {
+  const sql = `SELECT id, batch_id, r2_path, captured_at, size_bytes FROM batch_images WHERE batch_id = ?`;
+
+  const result = await db.prepare(sql).bind(batchId).all<BatchImageRow>();
+  return result.results ?? [];
+}
+
+/**
  * Updates a batch's status and optionally sets additional metric fields.
  *
  * @param db - D1Database binding

@@ -41,14 +41,14 @@ describe('Hono route skeleton', () => {
     stubValidGoogleToken();
   });
 
-  it('POST /v1/upload returns 501 Not Implemented when authenticated', async () => {
+  it('POST /v1/upload returns 400 when no multipart data is provided', async () => {
     const res = await app.request('/v1/upload', {
       method: 'POST',
       headers: { Authorization: 'Bearer valid-token' },
     }, env);
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body).toEqual({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
+    expect(body.error).toBeDefined();
   });
 
   it('GET /v1/status/:batch_id returns 501 Not Implemented when authenticated', async () => {
@@ -86,9 +86,9 @@ describe('Hono route skeleton', () => {
     expect(res.status).toBe(404);
   });
 
-  it('all 501 responses have correct JSON content type', async () => {
-    const res = await app.request('/v1/upload', {
-      method: 'POST',
+  it('all error responses have correct JSON content type', async () => {
+    const res = await app.request('/v1/status/test-batch-123', {
+      method: 'GET',
       headers: { Authorization: 'Bearer valid-token' },
     }, env);
     expect(res.headers.get('content-type')).toContain('application/json');

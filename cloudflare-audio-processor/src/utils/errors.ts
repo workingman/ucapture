@@ -65,3 +65,19 @@ export class NotFoundError extends AppError {
     this.name = 'NotFoundError';
   }
 }
+
+/** 413 Payload Too Large -- request body exceeds size limit. */
+export class PayloadTooLargeError extends AppError {
+  constructor(message = 'Payload too large') {
+    super(message, 413, 'PAYLOAD_TOO_LARGE');
+    this.name = 'PayloadTooLargeError';
+  }
+}
+
+/** 500 Internal Server Error -- storage or infrastructure failure. */
+export class StorageError extends AppError {
+  constructor(message = 'Storage operation failed') {
+    super(message, 500, 'STORAGE_ERROR');
+    this.name = 'StorageError';
+  }
+}

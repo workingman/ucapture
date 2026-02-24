@@ -151,3 +151,47 @@ function validateArtifactType(value: string): void {
     );
   }
 }
+
+/** Presigned URL expiry duration in seconds (15 minutes). */
+export const PRESIGNED_URL_EXPIRY_SECONDS = 900;
+
+/** Configuration for R2 S3-compatible presigned URL generation. */
+export interface R2PresignConfig {
+  readonly accountId: string;
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  readonly bucketName: string;
+}
+
+/**
+ * Generates a presigned URL for downloading an R2 object via S3-compatible API.
+ *
+ * @param config - R2 S3-compatible credentials
+ * @param r2Path - Full R2 object key
+ * @returns Presigned URL string with 15-minute expiry
+ */
+export async function generatePresignedUrl(
+  config: R2PresignConfig,
+  r2Path: string,
+): Promise<string> {
+  const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+
+  const client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+  });
+
+  const command = new GetObjectCommand({
+    Bucket: config.bucketName,
+    Key: r2Path,
+  });
+
+  return getSignedUrl(client, command, {
+    expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+  });
+}

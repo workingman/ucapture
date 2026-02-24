@@ -18,4 +18,16 @@ export interface Env {
 
   /** KV namespace for OAuth token cache */
   readonly TOKEN_CACHE: KVNamespace;
+
+  /** Cloudflare account ID for R2 S3-compatible endpoint */
+  readonly R2_ACCOUNT_ID: string;
+
+  /** R2 S3-compatible access key ID for presigned URLs */
+  readonly R2_ACCESS_KEY_ID: string;
+
+  /** R2 S3-compatible secret access key for presigned URLs */
+  readonly R2_SECRET_ACCESS_KEY: string;
+
+  /** R2 bucket name for S3-compatible presigned URL generation */
+  readonly R2_BUCKET_NAME: string;
 }

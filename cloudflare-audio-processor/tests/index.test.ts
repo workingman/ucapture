@@ -21,6 +21,10 @@ function createMockEnv(): Env {
     DB: {} as D1Database,
     PROCESSING_QUEUE: {} as Queue,
     PROCESSING_QUEUE_PRIORITY: {} as Queue,
+    R2_ACCOUNT_ID: 'fake-account',
+    R2_ACCESS_KEY_ID: 'fake-key',
+    R2_SECRET_ACCESS_KEY: 'fake-secret',
+    R2_BUCKET_NAME: 'fake-bucket',
   };
 }
 
@@ -71,14 +75,14 @@ describe('Hono route skeleton', () => {
     expect(res.headers.get('content-type')).toContain('application/json');
   });
 
-  it('GET /v1/download/:batch_id/:artifact_type returns 501 Not Implemented when authenticated', async () => {
-    const res = await app.request('/v1/download/test-batch-123/raw-audio', {
+  it('GET /v1/download/:batch_id/:artifact_type dispatches to download handler when authenticated', async () => {
+    const res = await app.request('/v1/download/test-batch-123/raw_audio', {
       method: 'GET',
       headers: { Authorization: 'Bearer valid-token' },
     }, env);
-    expect(res.status).toBe(501);
-    const body = await res.json();
-    expect(body).toEqual({ error: 'Not implemented', code: 'NOT_IMPLEMENTED' });
+    // Handler is implemented; with empty mock DB it returns 500 (not 501)
+    expect(res.status).not.toBe(501);
+    expect(res.headers.get('content-type')).toContain('application/json');
   });
 
   it('GET /unknown-route returns 404', async () => {
@@ -87,10 +91,12 @@ describe('Hono route skeleton', () => {
   });
 
   it('all error responses have correct JSON content type', async () => {
-    const res = await app.request('/v1/download/test-batch/raw_audio', {
+    // Use invalid artifact type to get a clean 400 without DB access
+    const res = await app.request('/v1/download/test-batch/invalid_type', {
       method: 'GET',
       headers: { Authorization: 'Bearer valid-token' },
     }, env);
+    expect(res.status).toBe(400);
     expect(res.headers.get('content-type')).toContain('application/json');
   });
 });

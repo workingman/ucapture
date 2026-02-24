@@ -65,6 +65,13 @@ class TestASREngineABC:
         engine = MockASR()
         assert isinstance(engine, ASREngine)
 
+    def test_incomplete_subclass_raises_type_error(self) -> None:
+        class IncompleteASR(ASREngine):
+            pass  # Missing transcribe() implementation
+
+        with pytest.raises(TypeError):
+            IncompleteASR()  # type: ignore[abstract]
+
     @pytest.mark.asyncio
     async def test_concrete_subclass_transcribe_returns_transcript(self) -> None:
         class MockASR(ASREngine):

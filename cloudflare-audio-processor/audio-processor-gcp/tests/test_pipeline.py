@@ -20,6 +20,7 @@ from audio_processor.pipeline import (
     _build_completion_event,
     _build_stage_rows,
     _determine_error_stage,
+    _parse_recording_started_at,
     process_batch,
 )
 from audio_processor.utils.errors import ASRError, AudioFetchError, StorageError
@@ -618,29 +619,43 @@ class TestBuildCompletionEvent:
     """Tests for _build_completion_event helper."""
 
     def test_completed_event_structure(self):
-        """Completed event has correct fields."""
+        """Completed event has correct fields including recording_started_at."""
         event = _build_completion_event(
             batch_id="b1",
             user_id="u1",
             status="completed",
             artifact_paths={"raw_audio": "u1/b1/raw-audio/recording.m4a"},
+            recording_started_at="2026-02-22T14:30:27Z",
         )
         assert event["batch_id"] == "b1"
         assert event["user_id"] == "u1"
         assert event["status"] == "completed"
+        assert event["recording_started_at"] == "2026-02-22T14:30:27Z"
         assert "published_at" in event
         assert "error_message" not in event
 
     def test_failed_event_includes_error_message(self):
-        """Failed event includes error_message field."""
+        """Failed event includes error_message and recording_started_at."""
         event = _build_completion_event(
             batch_id="b1",
             user_id="u1",
             status="failed",
             artifact_paths={},
+            recording_started_at="2026-02-22T14:30:27Z",
             error_message="Speechmatics timeout",
         )
         assert event["error_message"] == "Speechmatics timeout"
+        assert event["recording_started_at"] == "2026-02-22T14:30:27Z"
+
+    def test_recording_started_at_defaults_to_empty_string(self):
+        """Event recording_started_at defaults to empty string."""
+        event = _build_completion_event(
+            batch_id="b1",
+            user_id="u1",
+            status="completed",
+            artifact_paths={},
+        )
+        assert event["recording_started_at"] == ""
 
 
 class TestMetricsIntegration:
@@ -1052,3 +1067,155 @@ class TestD1MetricsFromPipeline:
         stages = call_kwargs["stages"]
         # At least fetch, transcode, vad, denoise, asr, postprocess, emotion, store
         assert len(stages) >= 8
+
+
+class TestParseRecordingStartedAt:
+    """Tests for _parse_recording_started_at helper (#52)."""
+
+    def test_valid_batch_id_returns_iso_timestamp(self):
+        """Valid batch ID returns correct ISO 8601 UTC timestamp."""
+        batch_id = "20260222-143027-GMT-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        result = _parse_recording_started_at(batch_id)
+        assert result == "2026-02-22T14:30:27Z"
+
+    def test_different_timestamp(self):
+        """Different timestamp values parse correctly."""
+        batch_id = "20251231-235959-GMT-00000000-0000-0000-0000-000000000000"
+        result = _parse_recording_started_at(batch_id)
+        assert result == "2025-12-31T23:59:59Z"
+
+    def test_invalid_batch_id_returns_empty_string(self):
+        """Non-matching batch ID returns empty string."""
+        result = _parse_recording_started_at("batch-123")
+        assert result == ""
+
+    def test_empty_batch_id_returns_empty_string(self):
+        """Empty batch ID returns empty string."""
+        result = _parse_recording_started_at("")
+        assert result == ""
+
+
+class TestCompletionEventRecordingStartedAt:
+    """Tests for recording_started_at in completion events (#52)."""
+
+    async def test_failure_event_includes_recording_started_at(
+        self, mock_r2_client, mock_d1_client
+    ):
+        """Failure completion event includes recording_started_at parsed from batch_id."""
+        batch_id = "20260222-143027-GMT-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        mock_r2_client.fetch_object.side_effect = AudioFetchError(
+            "Not found", key="key"
+        )
+
+        with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+            mock_tmpdir.return_value.__enter__ = MagicMock(
+                return_value="/tmp/test"
+            )
+            mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+            await process_batch(
+                batch_id, "user-1", mock_r2_client, mock_d1_client
+            )
+
+        mock_d1_client.publish_completion_event.assert_called_once()
+        event = mock_d1_client.publish_completion_event.call_args[0][0]
+        assert event["recording_started_at"] == "2026-02-22T14:30:27Z"
+        assert event["status"] == "failed"
+
+    @patch("audio_processor.pipeline.run_emotion_analysis")
+    @patch("audio_processor.pipeline.insert_timestamp_markers")
+    @patch("audio_processor.pipeline.get_asr_engine")
+    @patch("audio_processor.pipeline.get_denoise_engine")
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_success_event_includes_recording_started_at(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_get_denoise,
+        mock_get_asr,
+        mock_insert_markers,
+        mock_run_emotion,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Success completion event includes recording_started_at parsed from batch_id."""
+        batch_id = "20260222-143027-GMT-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=True)
+        mock_get_vad.return_value = mock_vad_engine
+        mock_denoise_engine = MagicMock()
+        mock_denoise_engine.process.return_value = _make_denoise_result()
+        mock_get_denoise.return_value = mock_denoise_engine
+        mock_asr_engine = AsyncMock()
+        mock_asr_engine.transcribe.return_value = _make_transcript()
+        mock_get_asr.return_value = mock_asr_engine
+        mock_insert_markers.return_value = "Hello world"
+        mock_run_emotion.return_value = None
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+            file_mock.read.return_value = b"data"
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                await process_batch(
+                    batch_id, "user-1", mock_r2_client, mock_d1_client
+                )
+
+        mock_d1_client.publish_completion_event.assert_called_once()
+        event = mock_d1_client.publish_completion_event.call_args[0][0]
+        assert event["recording_started_at"] == "2026-02-22T14:30:27Z"
+        assert event["status"] == "completed"
+
+    @patch("audio_processor.pipeline.get_vad_engine")
+    @patch("audio_processor.pipeline.transcode_to_wav")
+    async def test_zero_speech_event_includes_recording_started_at(
+        self,
+        mock_transcode,
+        mock_get_vad,
+        mock_r2_client,
+        mock_d1_client,
+    ):
+        """Zero-speech completion event includes recording_started_at."""
+        batch_id = "20260222-143027-GMT-a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        mock_transcode.return_value = _make_transcode_result()
+        mock_vad_engine = MagicMock()
+        mock_vad_engine.process.return_value = _make_vad_result(has_speech=False)
+        mock_get_vad.return_value = mock_vad_engine
+
+        with patch("builtins.open", create=True) as mock_open:
+            file_mock = MagicMock()
+
+            def side_effect(path, mode="r"):
+                ctx = MagicMock()
+                ctx.__enter__ = MagicMock(return_value=file_mock)
+                ctx.__exit__ = MagicMock(return_value=False)
+                return ctx
+
+            mock_open.side_effect = side_effect
+
+            with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                mock_tmpdir.return_value.__enter__ = MagicMock(
+                    return_value="/tmp/test"
+                )
+                mock_tmpdir.return_value.__exit__ = MagicMock(return_value=False)
+                await process_batch(
+                    batch_id, "user-1", mock_r2_client, mock_d1_client
+                )
+
+        mock_d1_client.publish_completion_event.assert_called_once()
+        event = mock_d1_client.publish_completion_event.call_args[0][0]
+        assert event["recording_started_at"] == "2026-02-22T14:30:27Z"
+        assert event["status"] == "completed"

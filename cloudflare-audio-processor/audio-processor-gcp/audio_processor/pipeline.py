@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -33,6 +34,35 @@ logger = logging.getLogger(__name__)
 
 # Speechmatics cost estimate: $0.24/hr = $0.004/min = ~$0.0000667/sec
 SPEECHMATICS_COST_PER_SECOND = 0.24 / 3600
+
+# Batch ID format: YYYYMMDD-HHMMSS-GMT-{uuid4}
+_BATCH_ID_PATTERN = re.compile(
+    r"^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-GMT-"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+
+def _parse_recording_started_at(batch_id: str) -> str:
+    """Extract recording_started_at ISO 8601 timestamp from a batch ID.
+
+    Batch ID format: YYYYMMDD-HHMMSS-GMT-{uuid4}. The timestamp portion
+    encodes the recording start time in UTC.
+
+    Args:
+        batch_id: Batch identifier in standard format.
+
+    Returns:
+        ISO 8601 UTC string (e.g., "2026-02-22T14:30:27Z").
+        Empty string if batch_id does not match expected format.
+    """
+    match = _BATCH_ID_PATTERN.match(batch_id)
+    if not match:
+        logger.warning(
+            "Cannot parse recording_started_at from batch_id: %s", batch_id
+        )
+        return ""
+    year, month, day, hours, minutes, seconds = match.groups()[:6]
+    return f"{year}-{month}-{day}T{hours}:{minutes}:{seconds}Z"
 
 
 @dataclass
@@ -134,6 +164,9 @@ async def process_batch(
     # R2 path prefix for this batch
     path_prefix = f"{user_id}/{batch_id}"
 
+    # Extract recording_started_at from batch_id timestamp
+    recording_started_at = _parse_recording_started_at(batch_id)
+
     try:
         result = await _run_pipeline(
             batch_id=batch_id,
@@ -144,6 +177,7 @@ async def process_batch(
             stage_timings=stage_timings,
             artifact_paths=artifact_paths,
             queue_wait_time_seconds=queue_wait_time_seconds,
+            recording_started_at=recording_started_at,
         )
         return result
 
@@ -198,6 +232,7 @@ async def process_batch(
             user_id=user_id,
             status="failed",
             artifact_paths=artifact_paths,
+            recording_started_at=recording_started_at,
             error_message=error_message,
         )
         try:
@@ -259,6 +294,7 @@ async def _run_pipeline(
     stage_timings: dict[str, float],
     artifact_paths: dict[str, str],
     queue_wait_time_seconds: float = 0.0,
+    recording_started_at: str = "",
 ) -> ProcessingResult:
     """Execute the full pipeline stages. Raises on failure."""
     wall_start = time.monotonic()
@@ -308,6 +344,7 @@ async def _run_pipeline(
                 wall_start=wall_start,
                 queue_wait_time_seconds=queue_wait_time_seconds,
                 raw_audio_size_bytes=raw_audio_size_bytes,
+                recording_started_at=recording_started_at,
             )
 
         # Stage 4: Denoise (passthrough with null provider)
@@ -445,6 +482,7 @@ async def _run_pipeline(
                 user_id=user_id,
                 status="completed",
                 artifact_paths=artifact_paths,
+                recording_started_at=recording_started_at,
             )
             await d1_client.publish_completion_event(event)
 
@@ -486,6 +524,7 @@ async def _handle_zero_speech(
     wall_start: float,
     queue_wait_time_seconds: float = 0.0,
     raw_audio_size_bytes: int = 0,
+    recording_started_at: str = "",
 ) -> ProcessingResult:
     """Handle a batch with no detected speech.
 
@@ -540,6 +579,7 @@ async def _handle_zero_speech(
             user_id=user_id,
             status="completed",
             artifact_paths=artifact_paths,
+            recording_started_at=recording_started_at,
         )
         await d1_client.publish_completion_event(event)
 
@@ -703,6 +743,7 @@ def _build_completion_event(
     user_id: str,
     status: str,
     artifact_paths: dict[str, str],
+    recording_started_at: str = "",
     error_message: str | None = None,
 ) -> dict[str, Any]:
     """Build a CompletionEvent dict per TDD Section 4.3."""
@@ -710,6 +751,7 @@ def _build_completion_event(
         "batch_id": batch_id,
         "user_id": user_id,
         "status": status,
+        "recording_started_at": recording_started_at,
         "artifact_paths": artifact_paths,
         "published_at": datetime.now(UTC).isoformat(),
     }

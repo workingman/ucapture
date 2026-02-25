@@ -57,7 +57,8 @@ class R2Client:
         """Retrieve an object from R2 by key.
 
         Args:
-            key: The R2 object key (e.g., "{user_id}/{batch_id}/raw-audio/recording.m4a").
+            key: The R2 object key
+                (e.g., "{user_id}/{batch_id}/raw-audio/recording.m4a").
 
         Returns:
             Raw bytes of the object.

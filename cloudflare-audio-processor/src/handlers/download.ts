@@ -23,6 +23,7 @@ const ARTIFACT_TYPE_COLUMNS: Record<string, keyof BatchRow> = {
   cleaned_audio: 'cleaned_audio_path',
   transcript_formatted: 'transcript_formatted_path',
   transcript_raw: 'transcript_raw_path',
+  transcript_emotion: 'transcript_emotion_path',
   metadata: 'metadata_path',
 };
 

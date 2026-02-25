@@ -489,10 +489,17 @@ Authorization: Bearer {google_oauth_token}
   "batch_id": "20260222-143027-GMT-a3f2c1b9-8e7d-4c5a-9b1e-2f3a4b5c6d7e",
   "user_id": "107234567890123456789",
   "status": "completed",
+  "priority": "normal",
   "recording_started_at": "2026-02-22T14:30:00Z",
+  "recording_ended_at": "2026-02-22T14:59:47Z",
   "recording_duration_seconds": 1847.3,
   "uploaded_at": "2026-02-22T14:30:28Z",
+  "processing_started_at": "2026-02-22T14:30:30Z",
   "processing_completed_at": "2026-02-22T14:38:15Z",
+  "processing_wall_time_seconds": 465.0,
+  "queue_wait_time_seconds": 2.0,
+  "raw_audio_size_bytes": 14200000,
+  "raw_audio_duration_seconds": 1847.3,
   "artifacts": {
     "raw_audio": "107234567890123456789/20260222-143027-GMT-.../raw-audio/recording.m4a",
     "metadata": "107234567890123456789/20260222-143027-GMT-.../metadata/metadata.json",
@@ -508,7 +515,10 @@ Authorization: Bearer {google_oauth_token}
     "speech_duration_seconds": 420.5,
     "speech_ratio": 0.23,
     "speechmatics_cost_estimate": 0.63
-  }
+  },
+  "retry_count": 0,
+  "error_message": null,
+  "error_stage": null
 }
 ```
 
@@ -516,10 +526,18 @@ Authorization: Bearer {google_oauth_token}
 ```json
 {
   "batch_id": "...",
+  "user_id": "...",
   "status": "failed",
+  "priority": "normal",
+  "artifacts": {},
+  "metrics": {
+    "speech_duration_seconds": null,
+    "speech_ratio": null,
+    "speechmatics_cost_estimate": null
+  },
+  "retry_count": 3,
   "error_message": "Speechmatics API timeout after 3 retries",
-  "error_stage": "asr",
-  "retry_count": 3
+  "error_stage": "asr"
 }
 ```
 
@@ -583,7 +601,7 @@ Query Parameters:
 Authorization: Bearer {google_oauth_token}
 
 Path Parameters:
-- artifact_type: "raw_audio" | "cleaned_audio" | "transcript_formatted" | "transcript_raw" | "metadata"
+- artifact_type: "raw_audio" | "cleaned_audio" | "transcript_formatted" | "transcript_raw" | "transcript_emotion" | "metadata"
 ```
 
 **Response** (302 Redirect):

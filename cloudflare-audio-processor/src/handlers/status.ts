@@ -88,8 +88,11 @@ function buildStatusResponse(
     queue_wait_time_seconds: batch.queue_wait_time_seconds,
     raw_audio_size_bytes: batch.raw_audio_size_bytes,
     raw_audio_duration_seconds: batch.raw_audio_duration_seconds,
-    speech_duration_seconds: batch.speech_duration_seconds,
-    speech_ratio: batch.speech_ratio,
+    metrics: {
+      speech_duration_seconds: batch.speech_duration_seconds,
+      speech_ratio: batch.speech_ratio,
+      speechmatics_cost_estimate: batch.speechmatics_cost_estimate,
+    },
     retry_count: batch.retry_count,
     error_message: batch.error_message,
     error_stage: batch.error_stage,

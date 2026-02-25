@@ -145,8 +145,9 @@ describe('GET /v1/status/:batch_id', () => {
     expect(body.artifacts.transcript_raw).toBe(batch.transcript_raw_path);
     expect(body.artifacts.transcript_emotion).toBeUndefined();
     expect(body.artifacts.images).toEqual([images[0].r2_path]);
-    expect(body.speech_duration_seconds).toBe(1500);
-    expect(body.speech_ratio).toBe(0.85);
+    expect(body.metrics.speech_duration_seconds).toBe(1500);
+    expect(body.metrics.speech_ratio).toBe(0.85);
+    expect(body.metrics.speechmatics_cost_estimate).toBe(0.12);
   });
 
   it('returns 200 with error details for failed batch', async () => {

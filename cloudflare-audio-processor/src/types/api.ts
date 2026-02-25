@@ -13,6 +13,13 @@ export interface UploadResponse {
   readonly uploaded_at: string;
 }
 
+/** Nested metrics for StatusResponse (TDD Section 4.1). */
+export interface StatusMetrics {
+  readonly speech_duration_seconds: number | null;
+  readonly speech_ratio: number | null;
+  readonly speechmatics_cost_estimate: number | null;
+}
+
 /** GET /v1/status/:batch_id response body. */
 export interface StatusResponse {
   readonly batch_id: string;
@@ -30,8 +37,7 @@ export interface StatusResponse {
   readonly queue_wait_time_seconds: number | null;
   readonly raw_audio_size_bytes: number | null;
   readonly raw_audio_duration_seconds: number | null;
-  readonly speech_duration_seconds: number | null;
-  readonly speech_ratio: number | null;
+  readonly metrics: StatusMetrics;
   readonly retry_count: number;
   readonly error_message: string | null;
   readonly error_stage: string | null;

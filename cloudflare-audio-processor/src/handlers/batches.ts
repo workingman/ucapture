@@ -102,8 +102,11 @@ function batchRowToSummary(row: BatchRow): StatusResponse {
     queue_wait_time_seconds: row.queue_wait_time_seconds,
     raw_audio_size_bytes: row.raw_audio_size_bytes,
     raw_audio_duration_seconds: row.raw_audio_duration_seconds,
-    speech_duration_seconds: row.speech_duration_seconds,
-    speech_ratio: row.speech_ratio,
+    metrics: {
+      speech_duration_seconds: row.speech_duration_seconds,
+      speech_ratio: row.speech_ratio,
+      speechmatics_cost_estimate: row.speechmatics_cost_estimate,
+    },
     retry_count: row.retry_count,
     error_message: row.error_message,
     error_stage: row.error_stage,

@@ -265,7 +265,7 @@ async def _run_pipeline(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Stage 1: Fetch raw audio from R2
-        raw_audio_key = f"{path_prefix}/audio/recording.m4a"
+        raw_audio_key = f"{path_prefix}/raw-audio/recording.m4a"
         with _StageTimer("fetch", stage_timings):
             audio_data = await _fetch_with_retry(r2_client, raw_audio_key)
 
@@ -498,7 +498,7 @@ async def _handle_zero_speech(
             r2_client, formatted_key, b"", "text/plain"
         )
         artifact_paths["transcript_formatted"] = formatted_key
-        artifact_paths["raw_audio"] = f"{path_prefix}/audio/recording.m4a"
+        artifact_paths["raw_audio"] = f"{path_prefix}/raw-audio/recording.m4a"
 
     wall_time = time.monotonic() - wall_start
 

@@ -497,7 +497,7 @@ class TestProcessBatchFailure:
     ):
         """AudioFetchError during fetch returns failed result with error_stage."""
         mock_r2_client.fetch_object.side_effect = AudioFetchError(
-            "Object not found", key="user-1/batch-123/audio/recording.m4a"
+            "Object not found", key="user-1/batch-123/raw-audio/recording.m4a"
         )
 
         with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
@@ -623,7 +623,7 @@ class TestBuildCompletionEvent:
             batch_id="b1",
             user_id="u1",
             status="completed",
-            artifact_paths={"raw_audio": "u1/b1/audio/recording.m4a"},
+            artifact_paths={"raw_audio": "u1/b1/raw-audio/recording.m4a"},
         )
         assert event["batch_id"] == "b1"
         assert event["user_id"] == "u1"

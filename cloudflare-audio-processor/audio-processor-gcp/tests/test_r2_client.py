@@ -68,11 +68,11 @@ class TestR2ClientFetchObject:
         mock_body.read.return_value = b"audio-data-bytes"
         mock_s3.get_object.return_value = {"Body": mock_body}
 
-        result = client.fetch_object("user1/batch1/audio/recording.m4a")
+        result = client.fetch_object("user1/batch1/raw-audio/recording.m4a")
 
         assert result == b"audio-data-bytes"
         mock_s3.get_object.assert_called_once_with(
-            Bucket="test-bucket", Key="user1/batch1/audio/recording.m4a"
+            Bucket="test-bucket", Key="user1/batch1/raw-audio/recording.m4a"
         )
 
     def test_fetch_object_raises_audio_fetch_error_on_client_error(self):

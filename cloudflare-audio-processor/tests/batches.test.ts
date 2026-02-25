@@ -147,6 +147,33 @@ describe('GET /v1/batches', () => {
     expect(body.batches[0].status).toBe('completed');
   });
 
+  it('returns lightweight BatchSummary with only 4 fields per TDD Section 4.1', async () => {
+    const db = createMockD1({ listResults: [makeBatchRow()], countResult: 1 });
+    const env = createMockEnv(db);
+
+    const res = await app.request('/v1/batches', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer valid-token' },
+    }, env);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const summary = body.batches[0];
+    expect(Object.keys(summary).sort()).toEqual([
+      'batch_id',
+      'recording_started_at',
+      'status',
+      'uploaded_at',
+    ]);
+    expect(summary.batch_id).toBe('20260222-143027-GMT-a1b2c3d4-e5f6-7890-abcd-ef1234567890');
+    expect(summary.status).toBe('completed');
+    expect(summary.recording_started_at).toBe('2026-02-22T14:30:27Z');
+    expect(summary.uploaded_at).toBe('2026-02-22T14:31:00Z');
+    expect(summary.user_id).toBeUndefined();
+    expect(summary.artifacts).toBeUndefined();
+    expect(summary.metrics).toBeUndefined();
+  });
+
   it('returns 400 for invalid status value', async () => {
     const db = createMockD1();
     const env = createMockEnv(db);

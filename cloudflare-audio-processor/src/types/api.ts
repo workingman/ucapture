@@ -50,9 +50,17 @@ export interface Pagination {
   readonly total: number;
 }
 
+/** Lightweight summary returned in GET /v1/batches (TDD Section 4.1). */
+export interface BatchSummary {
+  readonly batch_id: string;
+  readonly status: BatchStatus;
+  readonly recording_started_at: string;
+  readonly uploaded_at: string;
+}
+
 /** GET /v1/batches response body. */
 export interface BatchListResponse {
-  readonly batches: StatusResponse[];
+  readonly batches: BatchSummary[];
   readonly pagination: Pagination;
 }
 

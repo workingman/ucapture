@@ -7,11 +7,9 @@
 
 import type { Context } from 'hono';
 import type { Env } from '../env.d.ts';
-import type { BatchListResponse, Pagination } from '../types/api.ts';
+import type { BatchListResponse, BatchSummary, Pagination } from '../types/api.ts';
 import { listBatches, countBatches } from '../storage/d1.ts';
 import type { ListBatchesFilter, BatchRow } from '../storage/d1.ts';
-import type { StatusResponse } from '../types/api.ts';
-import type { ArtifactPaths } from '../types/batch.ts';
 import { BatchListQuerySchema } from '../utils/validation.ts';
 import { ValidationError } from '../utils/errors.ts';
 
@@ -82,47 +80,12 @@ function extractQueryParams(
   return params;
 }
 
-/** Converts a BatchRow to a StatusResponse summary (without images). */
-function batchRowToSummary(row: BatchRow): StatusResponse {
-  const artifacts = buildArtifactsMap(row);
-
+/** Converts a BatchRow to a lightweight BatchSummary (TDD Section 4.1). */
+function batchRowToSummary(row: BatchRow): BatchSummary {
   return {
     batch_id: row.id,
-    user_id: row.user_id,
-    status: row.status as StatusResponse['status'],
-    priority: row.priority as StatusResponse['priority'],
-    artifacts,
+    status: row.status as BatchSummary['status'],
     recording_started_at: row.recording_started_at,
-    recording_ended_at: row.recording_ended_at,
-    recording_duration_seconds: row.recording_duration_seconds,
     uploaded_at: row.uploaded_at,
-    processing_started_at: row.processing_started_at,
-    processing_completed_at: row.processing_completed_at,
-    processing_wall_time_seconds: row.processing_wall_time_seconds,
-    queue_wait_time_seconds: row.queue_wait_time_seconds,
-    raw_audio_size_bytes: row.raw_audio_size_bytes,
-    raw_audio_duration_seconds: row.raw_audio_duration_seconds,
-    metrics: {
-      speech_duration_seconds: row.speech_duration_seconds,
-      speech_ratio: row.speech_ratio,
-      speechmatics_cost_estimate: row.speechmatics_cost_estimate,
-    },
-    retry_count: row.retry_count,
-    error_message: row.error_message,
-    error_stage: row.error_stage,
   };
-}
-
-/** Builds the artifacts map from a batch row, omitting NULL paths. */
-function buildArtifactsMap(row: BatchRow): ArtifactPaths {
-  const artifacts: Record<string, unknown> = {};
-
-  if (row.raw_audio_path) artifacts.raw_audio = row.raw_audio_path;
-  if (row.metadata_path) artifacts.metadata = row.metadata_path;
-  if (row.cleaned_audio_path) artifacts.cleaned_audio = row.cleaned_audio_path;
-  if (row.transcript_formatted_path) artifacts.transcript_formatted = row.transcript_formatted_path;
-  if (row.transcript_raw_path) artifacts.transcript_raw = row.transcript_raw_path;
-  if (row.transcript_emotion_path) artifacts.transcript_emotion = row.transcript_emotion_path;
-
-  return artifacts as ArtifactPaths;
 }

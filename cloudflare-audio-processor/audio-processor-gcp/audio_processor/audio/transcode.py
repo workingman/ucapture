@@ -72,7 +72,7 @@ def _check_audio_valid(input_path: str) -> None:
     ]
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             cmd,
             check=True,
             capture_output=True,

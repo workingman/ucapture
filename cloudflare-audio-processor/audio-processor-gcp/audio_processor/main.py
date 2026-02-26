@@ -74,7 +74,7 @@ async def _run(consumer: QueueConsumer, d1_client: D1Client) -> None:
     # Wait for consumer task to finish with a timeout to avoid SIGKILL
     try:
         await asyncio.wait_for(consumer_task, timeout=SHUTDOWN_TIMEOUT_SECONDS)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "Shutdown timed out after %ds — cancelling in-flight work. "
             "Interrupted batch remains in 'processing' status for reprocessing.",

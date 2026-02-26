@@ -144,7 +144,11 @@ class QueueConsumer:
             response = await client.post(
                 url,
                 headers=self._headers(),
-                json={"batch_size": self.batch_size},
+                json={
+                    "batch_size": self.batch_size,
+                    # 10-minute lease: covers R2 download + transcode + VAD + ASR wait
+                    "visibility_timeout_ms": 600_000,
+                },
                 timeout=30.0,
             )
             response.raise_for_status()

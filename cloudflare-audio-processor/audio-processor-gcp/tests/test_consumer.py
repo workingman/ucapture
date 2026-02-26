@@ -312,3 +312,24 @@ class TestQueueConsumerPullMessages:
             messages = await consumer._pull_messages("normal-queue-id", client)
 
         assert messages == []
+
+    async def test_pull_request_includes_visibility_timeout(self):
+        """Pull request sends visibility_timeout_ms to prevent lease expiry during long jobs."""
+        captured_requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_requests.append(request)
+            return httpx.Response(
+                200,
+                json={"result": {"messages": []}},
+                request=request,
+            )
+
+        consumer = self._make_consumer()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await consumer._pull_messages("normal-queue-id", client)
+
+        assert len(captured_requests) == 1
+        body = json.loads(captured_requests[0].content)
+        assert "visibility_timeout_ms" in body
+        assert body["visibility_timeout_ms"] >= 300_000  # at least 5 minutes

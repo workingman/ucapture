@@ -3,6 +3,7 @@ package ca.dgbi.ucapture.ui.settings
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import ca.dgbi.ucapture.data.preferences.StoragePreferences
 import ca.dgbi.ucapture.data.remote.GoogleDriveAuthManager
 import ca.dgbi.ucapture.data.remote.GoogleDriveStorage
 import ca.dgbi.ucapture.data.remote.UploadScheduler
@@ -23,13 +24,19 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(
     private val authManager: GoogleDriveAuthManager,
     private val storage: GoogleDriveStorage,
-    private val uploadScheduler: UploadScheduler
+    private val uploadScheduler: UploadScheduler,
+    private val storagePreferences: StoragePreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            storagePreferences.useCloudflareWorker.collect { useCloudflare ->
+                _uiState.update { it.copy(useCloudflareWorker = useCloudflare) }
+            }
+        }
         viewModelScope.launch {
             refreshAuthState()
         }
@@ -99,6 +106,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun toggleStorageBackend(useCloudflare: Boolean) {
+        viewModelScope.launch {
+            storagePreferences.setUseCloudflareWorker(useCloudflare)
+        }
+    }
+
     private suspend fun refreshAuthState() {
         val isSignedIn = authManager.isSignedIn()
         val email = if (isSignedIn) authManager.getCurrentAccountEmail() else null
@@ -123,5 +136,6 @@ data class SettingsUiState(
     val userEmail: String? = null,
     val currentFolderName: String? = null,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val useCloudflareWorker: Boolean = true
 )

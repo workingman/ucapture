@@ -1,27 +1,39 @@
 package ca.dgbi.ucapture.di
 
+import ca.dgbi.ucapture.data.preferences.StoragePreferences
 import ca.dgbi.ucapture.data.remote.CloudStorageProvider
 import ca.dgbi.ucapture.data.remote.CloudflareWorkerStorage
-import dagger.Binds
+import ca.dgbi.ucapture.data.remote.GoogleDriveStorage
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.runBlocking
 import javax.inject.Singleton
 
 /**
  * Hilt module for network/cloud storage dependencies.
  *
- * Binds [CloudflareWorkerStorage] as the active [CloudStorageProvider].
- * Recordings are uploaded to the Cloudflare Worker at audio-processor.geoff-ec6.workers.dev
- * rather than directly to Google Drive.
+ * Provides [CloudStorageProvider] that switches between Cloudflare Worker
+ * and Google Drive based on the [StoragePreferences] setting.
+ * Default is Cloudflare Worker.
  */
 @Module
 @InstallIn(SingletonComponent::class)
-abstract class NetworkModule {
+object NetworkModule {
 
-    @Binds
+    @Provides
     @Singleton
-    abstract fun bindCloudStorageProvider(
-        cloudflareWorkerStorage: CloudflareWorkerStorage
-    ): CloudStorageProvider
+    fun provideCloudStorageProvider(
+        cloudflareWorkerStorage: CloudflareWorkerStorage,
+        googleDriveStorage: GoogleDriveStorage,
+        storagePreferences: StoragePreferences
+    ): CloudStorageProvider {
+        // Use runBlocking to get the preference synchronously for injection
+        // In normal operation, this reads from cached preference
+        val useCloudflare = runBlocking {
+            storagePreferences.isUsingCloudflareWorker()
+        }
+        return if (useCloudflare) cloudflareWorkerStorage else googleDriveStorage
+    }
 }

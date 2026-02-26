@@ -1,5 +1,6 @@
 """Tests for retry_with_backoff decorator."""
 
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -245,3 +246,44 @@ class TestRetryableExceptions:
 
         # 1 initial + 2 retries = 3 total calls
         assert call_count == 3
+
+
+class TestRetryLogging:
+    """Tests for retry attempt logging."""
+
+    @pytest.mark.asyncio
+    async def test_retry_logs_warning_with_attempt_info(self, caplog) -> None:
+        """Each retry attempt logs a warning with attempt number, delay, and error."""
+
+        @retry_with_backoff(
+            max_retries=2,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def always_fail() -> None:
+            raise ConnectionError("network down")
+
+        with caplog.at_level(logging.WARNING, logger="audio_processor.utils.retry"):
+            with pytest.raises(ConnectionError):
+                await always_fail()
+
+        retry_logs = [r for r in caplog.records if "Retry" in r.message]
+        assert len(retry_logs) == 2
+        assert "1/2" in retry_logs[0].message
+        assert "2/2" in retry_logs[1].message
+        assert "network down" in retry_logs[0].message
+        assert "always_fail" in retry_logs[0].message
+
+    @pytest.mark.asyncio
+    async def test_no_log_on_immediate_success(self, caplog) -> None:
+        """No retry logs when the function succeeds on first call."""
+
+        @retry_with_backoff(max_retries=3, base_delay=0.01)
+        async def succeed() -> str:
+            return "ok"
+
+        with caplog.at_level(logging.WARNING, logger="audio_processor.utils.retry"):
+            await succeed()
+
+        retry_logs = [r for r in caplog.records if "Retry" in r.message]
+        assert len(retry_logs) == 0

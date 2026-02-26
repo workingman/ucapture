@@ -5,9 +5,12 @@ Supports transient vs permanent failure classification via retryable_exceptions.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def retry_with_backoff(
@@ -48,6 +51,14 @@ def retry_with_backoff(
                         raise
                     if attempt < max_retries:
                         delay = base_delay * (2**attempt)
+                        logger.warning(
+                            "Retry %d/%d for %s after %.1fs: %s",
+                            attempt + 1,
+                            max_retries,
+                            func.__name__,
+                            delay,
+                            exc,
+                        )
                         await asyncio.sleep(delay)
             # Exhausted all retries — attach retry count before raising
             last_error._retry_count = max_retries  # type: ignore[union-attr]

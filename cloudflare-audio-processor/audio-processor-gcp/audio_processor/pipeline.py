@@ -323,7 +323,11 @@ async def _run_pipeline(
         # Stage 3: VAD (voice activity detection)
         with _StageTimer("vad", stage_timings):
             vad_provider = os.environ.get("VAD_PROVIDER", "silero")
-            vad_engine = get_vad_engine(vad_provider)
+            vad_kwargs: dict[str, object] = {}
+            vad_threshold_str = os.environ.get("VAD_THRESHOLD")
+            if vad_threshold_str is not None:
+                vad_kwargs["threshold"] = float(vad_threshold_str)
+            vad_engine = get_vad_engine(vad_provider, **vad_kwargs)
             vad_result = vad_engine.process(
                 transcode_result.output_path, tmp_dir
             )

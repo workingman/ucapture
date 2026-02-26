@@ -222,6 +222,60 @@ class TestSileroVADEngine:
             with pytest.raises(VADError, match="Failed to load Silero VAD model"):
                 SileroVADEngine(model_path="/nonexistent/model.onnx")
 
+    def test_partial_frame_zero_padded(self, tmp_path: object) -> None:
+        """Partial final frame is zero-padded and processed, not discarded."""
+        # 2 full frames + 100 extra samples = partial frame
+        extra_samples = 100
+        num_samples = FRAME_SIZE * 2 + extra_samples
+        input_path = os.path.join(str(tmp_path), "input.wav")
+        _create_wav(input_path, num_samples)
+
+        # 3 probabilities: 2 full frames + 1 partial frame
+        probabilities = [0.8, 0.1, 0.9]
+        mock_session = _make_mock_session(probabilities)
+        with patch("audio_processor.audio.vad.silero.ort") as mock_ort:
+            mock_ort.InferenceSession.return_value = mock_session
+            engine = SileroVADEngine(threshold=0.5)
+            result = engine.process(
+                input_path, os.path.join(str(tmp_path), "out")
+            )
+
+        # The mock session should have been called 3 times (2 full + 1 partial)
+        assert mock_session.run.call_count == 3
+        # Speech detected in frames 0 and 2 (partial)
+        assert result.speech_duration_seconds > 0
+
+    def test_configurable_threshold(self, tmp_path: object) -> None:
+        """Custom threshold changes speech detection sensitivity."""
+        # 4 frames with probabilities around 0.4
+        probabilities = [0.4, 0.4, 0.4, 0.4]
+        num_samples = FRAME_SIZE * 4
+        input_path = os.path.join(str(tmp_path), "input.wav")
+        _create_wav(input_path, num_samples)
+
+        mock_session = _make_mock_session(probabilities)
+
+        # With default threshold 0.5, all frames are silence
+        with patch("audio_processor.audio.vad.silero.ort") as mock_ort:
+            mock_ort.InferenceSession.return_value = mock_session
+            engine_strict = SileroVADEngine(threshold=0.5)
+            result_strict = engine_strict.process(
+                input_path, os.path.join(str(tmp_path), "out_strict")
+            )
+
+        assert result_strict.speech_duration_seconds == 0.0
+
+        # With lower threshold 0.3, all frames are speech
+        mock_session2 = _make_mock_session(probabilities)
+        with patch("audio_processor.audio.vad.silero.ort") as mock_ort:
+            mock_ort.InferenceSession.return_value = mock_session2
+            engine_lenient = SileroVADEngine(threshold=0.3)
+            result_lenient = engine_lenient.process(
+                input_path, os.path.join(str(tmp_path), "out_lenient")
+            )
+
+        assert result_lenient.speech_duration_seconds > 0
+
 
 class TestVADRegistry:
     """Tests for the VAD engine registry."""

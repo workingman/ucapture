@@ -136,6 +136,26 @@ class SileroVADEngine(VADEngine):
             frame_speech.append(prob >= self.threshold)
             offset += FRAME_SIZE
 
+        # Zero-pad partial final frame so tail samples are not discarded
+        remaining = len(float_samples) - offset
+        if remaining > 0:
+            padded = np.zeros(FRAME_SIZE, dtype=np.float32)
+            padded[:remaining] = float_samples[offset : offset + remaining]
+            chunk = padded.reshape(1, -1)
+            try:
+                output, state = self._session.run(
+                    ["output", "stateN"],
+                    {"input": chunk, "state": state, "sr": sr},
+                )
+            except Exception as exc:
+                raise VADError(
+                    f"ONNX inference failed at partial frame offset {offset}",
+                    detail=str(exc),
+                ) from exc
+
+            prob = float(output[0][0])
+            frame_speech.append(prob >= self.threshold)
+
         return frame_speech
 
     def _frames_to_segments(

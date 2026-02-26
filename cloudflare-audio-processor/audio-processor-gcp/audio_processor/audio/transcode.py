@@ -166,7 +166,7 @@ def transcode_to_wav(
             check=True,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=600,
         )
     except subprocess.CalledProcessError as exc:
         raise TranscodeError(
@@ -178,7 +178,7 @@ def transcode_to_wav(
         if exc.stderr:
             stderr_snippet = f" stderr: {exc.stderr.strip()[:200]}"
         raise TranscodeError(
-            f"ffmpeg transcode timed out after 120 seconds.{stderr_snippet}",
+            f"ffmpeg transcode timed out after 600 seconds.{stderr_snippet}",
             input_path=input_path,
         ) from exc
 

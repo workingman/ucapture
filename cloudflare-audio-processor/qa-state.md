@@ -8,18 +8,19 @@
 - Linter(s): ESLint + Prettier (Worker); Ruff + Black (GCP)
 
 ## Current Position
-Layer: COMPLETE
-Step: done
+Layer: GCP-DEPLOY
+Step: pending
 Cycle: 1
 
 ## Layer Status
-| Layer    | Status  | Issues Filed | Issues Open | Notes                                |
-|----------|---------|-------------|-------------|--------------------------------------|
-| BUILD    | PASS    | —           | —           | Typecheck clean, ruff clean, 301 tests |
-| BOOT     | PASS    | —           | —           | Worker 8787, GCP 8080, graceful shutdown |
-| RENDER   | PASS    | #49,#50,#51,#52,#53 | —   | All 5 issues resolved, verified     |
-| FUNCTION | PASS    | F-007 (#61) | #61         | Track A: 310/310 tests. Track B: 11/11 curl tests pass (1 skip: cross-user). F-007 filed as #61. fix-F-007.md written for Android dev. |
-| POLISH   | PASS    | #54,#55,#56,#57,#58,#59,#60 | — | All 7 issues committed (dfbcab0..c030dc7). 335 tests total (121 Vitest + ~214 pytest). |
+| Layer    | Status       | Issues Filed | Issues Open | Notes                                |
+|----------|--------------|-------------|-------------|--------------------------------------|
+| BUILD    | PASS         | —           | —           | Typecheck clean, ruff clean, 301 tests |
+| BOOT     | PASS (Worker only) | —     | —           | Worker verified on :8787. GCP booted locally during dev but never deployed to Cloud Run. |
+| RENDER   | PASS (Worker only) | #49,#50,#51,#52,#53 | — | All 5 issues resolved against deployed Worker. GCP pipeline untested on real infra. |
+| FUNCTION | PASS (Worker only) | F-007 (#61) | #61   | Track A: 310/310 tests. Track B: 11/11 Worker curl tests pass. GCP pipeline never triggered end-to-end. |
+| POLISH   | CODE DONE    | #54,#55,#56,#57,#58,#59,#60 | — | All 7 fixes committed. Unverified in prod — GCP not yet deployed. |
+| GCP-DEPLOY | PENDING    | —           | —           | Deploy to Cloud Run, run end-to-end pipeline test (upload → queue → GCP → ASR → transcript). |
 
 ## Layer Summaries (wisdom — persists across context boundaries)
 
@@ -56,10 +57,18 @@ reuse, test coverage gaps for edge cases. Pattern: resilience and edge-case hand
 during implementation — happy path is solid but failure modes need hardening.
 
 ## Active Context
-QA COMPLETE. All 5 layers passed. Worker deployed at https://audio-processor.geoff-ec6.workers.dev.
-GCP processor NOT YET deployed to Cloud Run (next step).
-F-007 open (#61): fix-F-007.md written for Android dev to align metadata format.
-Next: GCP Cloud Run deployment → end-to-end integration test.
+Worker QA complete and deployed. GCP QA incomplete — code is written and unit-tested but GCP
+has never been deployed to Cloud Run or run against real infrastructure. All POLISH findings
+were GCP-side fixes; none have been smoke-tested in production.
+
+Next steps:
+1. Deploy GCP processor to Cloud Run
+2. Run end-to-end pipeline: upload audio → Worker → CF Queue → GCP → Speechmatics → transcript
+3. Verify POLISH fixes hold under real load (retry, shutdown, VAD, ffprobe)
+4. Mark GCP-DEPLOY PASS once end-to-end produces a transcript
+
+F-007 (#61): fix-F-007.md written for Android dev. Blocking end-to-end from Android but
+not blocking GCP deployment test (can use curl to upload directly).
 
 ## POLISH Layer — Session Prompt
 

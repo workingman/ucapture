@@ -162,11 +162,16 @@ class ChunkManagerTest {
     }
 
     @Test
-    fun `completed chunk has same file as original`() {
-        val chunk = chunkManager.startNewSession()
+    fun `completed chunk file is renamed to end-time based name`() {
+        chunkManager.startNewSession()
         val completed = chunkManager.completeCurrentChunk()
 
-        assertEquals(chunk.file, completed!!.file)
+        val filename = completed!!.file.name
+        assertTrue(
+            "Completed chunk filename should use end-time format without chunk number: $filename",
+            filename.matches(Regex("ucap-\\d{8}-\\d{6}-[A-Z]{2,5}\\.m4a"))
+        )
+        assertEquals(recordingsDir, completed.file.parentFile)
     }
 
     @Test

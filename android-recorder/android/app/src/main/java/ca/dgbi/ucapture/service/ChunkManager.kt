@@ -102,8 +102,10 @@ class ChunkManager @Inject constructor() {
         val chunk = currentChunk ?: return null
         val now = ZonedDateTime.now()
 
+        val finalFile = renameToEndTimestamp(chunk.file, now)
+
         val completed = CompletedChunk(
-            file = chunk.file,
+            file = finalFile,
             chunkNumber = chunk.chunkNumber,
             startTime = chunk.startTime,
             endTime = now,
@@ -112,6 +114,23 @@ class ChunkManager @Inject constructor() {
 
         _completedChunks.tryEmit(completed)
         return completed
+    }
+
+    /**
+     * Rename the chunk file from its temporary start-time name to a final name
+     * based on the chunk's end time. The new name format is:
+     *   ucap-YYYYMMDD-HHmmss-TZ.m4a
+     *
+     * On Android, renaming an open file is safe — the MediaRecorder's file
+     * descriptor stays valid after the directory entry changes.
+     */
+    private fun renameToEndTimestamp(file: File, endTime: ZonedDateTime): File {
+        val timezone = TIMEZONE_FORMATTER.format(endTime)
+        val timestamp = TIMESTAMP_FORMATTER.format(endTime)
+        val newName = "ucap-$timestamp-$timezone.m4a"
+        val newFile = File(file.parentFile!!, newName)
+        file.renameTo(newFile)
+        return newFile
     }
 
     fun endSession(): CompletedChunk? {

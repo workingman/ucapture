@@ -17,7 +17,7 @@ Android audio recording app with GPS/calendar metadata, Google Drive upload.
 | 5.0 Google Drive integration | Partial (19/20) | Upload progress notification remaining |
 | 6.0 UI | Partial (19/29) | Missing: audio playback, some settings |
 | 7.0 Permissions/errors | Partial (13/19) | Missing: PermissionManager, onboarding, error UX |
-| 8.0 Testing/docs | Partial (14/32) | 107 tests passing, needs instrumented + manual tests |
+| 8.0 Testing/docs | Partial (14/32) | 106 tests passing, needs instrumented + manual tests |
 | Token refresh & upload recovery | Complete | |
 | Debug logging cleanup | Complete | |
 | Task list & PRD audit | Complete | Updated 2026-02-07 |
@@ -120,6 +120,44 @@ Resume → Chunk 2 starts (same session)
 Stop → Chunk 2 finalized (if recording) or cleanup (if paused)
 ```
 
+## Key Changes This Session (2026-02-25) — F-007 Fix
+
+### F-007: Align Android Metadata with Worker Upload API
+
+Switched the upload target from Google Drive to the Cloudflare Worker, and rewrote the metadata schema to match the Worker's Zod validation schema.
+
+**Metadata schema changes (`RecordingMetadata.kt` — complete rewrite):**
+- `recording` object: renamed fields to snake_case (`started_at`, `ended_at`, `duration_seconds`, `file_size_bytes`); added `audio_format`, `sample_rate`, `channels`, `bitrate`; removed `sessionId`, `chunkNumber`, `filename`, `md5Hash`
+- Added `device` object with `model`, `os_version`, `app_version` (from `Build.*` and `BuildConfig`)
+- `location` flattened from array-of-samples to single best-accuracy point
+- `calendar` simplified to single event with `event_id`, `event_title`, `attendees`
+- JSON output uses `FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES`; `toJson()` omits null sections so optional fields are absent (not `null`) in the JSON, which is what the Zod schema requires
+- Timestamps use UTC ISO 8601 via `Instant.toString()` (e.g. `2026-02-25T14:30:00Z`)
+
+**New upload implementation (`CloudflareWorkerStorage.kt`):**
+- Implements `CloudStorageProvider`; binds in `NetworkModule.kt` replacing `GoogleDriveStorage`
+- `multipart/form-data` POST to `https://audio-processor.geoff-ec6.workers.dev/v1/upload` using `HttpURLConnection` (no new dependency needed)
+- Streams audio file; reads metadata JSON file as a file part (CRITICAL: must have filename)
+- Bearer auth from `GoogleDriveAuthManager.getAccessToken()`
+- Returns `batch_id` from 202 response in `UploadResult.batchId`
+- Auto-retries once on 401/403 after token refresh
+
+**Database change (`RecordingEntity.kt` + migration):**
+- Added `batch_id TEXT` column (nullable, default null)
+- DB version bumped to 2; `AppDatabase.MIGRATION_1_2` applies `ALTER TABLE recordings ADD COLUMN batch_id TEXT`
+- New `RecordingDao.updateBatchId()` and `RecordingRepository.updateBatchId()`
+
+**UploadWorker changes:**
+- Builds `DeviceInfo` from `Build.*` (with `?: "unknown"` fallbacks for test null safety)
+- Passes `deviceInfo` to `RecordingMetadata.fromEntities()`
+- Removed MD5 verification block entirely (not supported by CF Worker)
+- Saves `batch_id` on successful upload
+
+**Test updates:** `UploadWorkerTest.kt` — removed MD5 verification test; renamed success test to also verify `updateBatchId` is called.
+All 106 tests pass. Build clean.
+
+---
+
 ## Key Changes This Session (2026-02-17)
 
 ### Silence Detection Design
@@ -178,8 +216,9 @@ See `../cloudflare-audio-processor/SESSION_NOTES.md` for server-side details.
 
 ### Remaining MVP Work (by priority)
 1. **RetentionManager fix** — Uploaded files (0.9GB) never get deleted from disk. Files from Feb 3 still present 5 days later. Investigate `RetentionManager` / post-upload cleanup logic. (Discovered 2026-02-08 via ADB after phone reboot; reboot itself was not caused by the app.)
-2. **Audio playback** (6.16-6.19) — `AudioPlayer.kt`, play/pause/seek, timeline scrubbing, progress indicator
-2. **Settings completeness** (6.22-6.25, 6.27) — audio quality picker, retention period, max storage, low storage threshold, storage stats display
+2. **F-007 done** — Worker upload + correct metadata schema now in place. Smoke-test the upload end-to-end with a real device against the deployed Worker.
+3. **Audio playback** (6.16-6.19) — `AudioPlayer.kt`, play/pause/seek, timeline scrubbing, progress indicator
+4. **Settings completeness** (6.22-6.25, 6.27) — audio quality picker, retention period, max storage, low storage threshold, storage stats display
 3. **Storage monitoring** (4.10-4.12) — available/used space calculation, low-space warnings
 4. **Permission onboarding** (7.1, 7.9) — `PermissionManager.kt`, first-launch flow
 5. **Error UX** (7.12, 7.13, 7.16) — storage full handling, mic-in-use handling, user-facing error notifications

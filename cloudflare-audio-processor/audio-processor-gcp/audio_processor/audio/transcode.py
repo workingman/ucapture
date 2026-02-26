@@ -29,7 +29,7 @@ class TranscodeResult:
     duration_seconds: float
 
 
-FFPROBE_TIMEOUT_SECONDS = 10
+FFPROBE_TIMEOUT_SECONDS = 60
 
 
 def _check_ffmpeg_available() -> str:

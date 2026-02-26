@@ -47,12 +47,18 @@ class D1Client:
                 "CLOUDFLARE_INTERNAL_SECRET is required", operation="init"
             )
 
+        self._client = httpx.AsyncClient(timeout=30.0)
+
     def _headers(self) -> dict[str, str]:
         """Build authentication headers for internal Worker endpoints."""
         return {
             "X-Internal-Secret": self.internal_secret,
             "Content-Type": "application/json",
         }
+
+    async def close(self) -> None:
+        """Close the shared HTTP client and release connection pool."""
+        await self._client.aclose()
 
     async def update_batch_status(
         self,
@@ -91,14 +97,12 @@ class D1Client:
 
         url = f"{self.worker_url}/internal/batch-status"
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+            response = await self._client.post(
+                url,
+                headers=self._headers(),
+                json=payload,
+            )
+            response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise StorageError(
                 f"D1 status update failed for batch '{batch_id}': "
@@ -127,14 +131,12 @@ class D1Client:
         url = f"{self.worker_url}/internal/publish-event"
         batch_id = event.get("batch_id", "unknown")
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    headers=self._headers(),
-                    json=event,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+            response = await self._client.post(
+                url,
+                headers=self._headers(),
+                json=event,
+            )
+            response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise StorageError(
                 f"Completion event publish failed for batch '{batch_id}': "
@@ -211,14 +213,12 @@ class D1Client:
 
         url = f"{self.worker_url}/internal/batch-status"
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+            response = await self._client.post(
+                url,
+                headers=self._headers(),
+                json=payload,
+            )
+            response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise StorageError(
                 f"D1 metrics update failed for batch '{batch_id}': "
@@ -263,14 +263,12 @@ class D1Client:
 
         url = f"{self.worker_url}/internal/processing-stages"
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    headers=self._headers(),
-                    json=payload,
-                    timeout=30.0,
-                )
-                response.raise_for_status()
+            response = await self._client.post(
+                url,
+                headers=self._headers(),
+                json=payload,
+            )
+            response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise StorageError(
                 f"D1 stage insert failed for batch '{batch_id}': "

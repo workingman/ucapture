@@ -40,6 +40,28 @@ class TestD1ClientInit:
             D1Client(worker_url="https://worker.example.com", internal_secret="")
 
 
+class TestD1ClientLifecycle:
+    """Tests for D1Client lifecycle management."""
+
+    async def test_close_closes_http_client(self):
+        """close() properly closes the underlying httpx.AsyncClient."""
+        client = D1Client(
+            worker_url="https://worker.example.com",
+            internal_secret="test-secret",
+        )
+        assert not client._client.is_closed
+        await client.close()
+        assert client._client.is_closed
+
+    def test_shared_client_created_on_init(self):
+        """D1Client creates a shared httpx.AsyncClient on init."""
+        client = D1Client(
+            worker_url="https://worker.example.com",
+            internal_secret="test-secret",
+        )
+        assert isinstance(client._client, httpx.AsyncClient)
+
+
 class TestD1ClientUpdateBatchStatus:
     """Tests for D1Client.update_batch_status()."""
 

@@ -114,4 +114,50 @@ describe('authMiddleware', () => {
     const body = await res.json();
     expect(body).toEqual({ error: 'Missing Authorization header' });
   });
+
+  it('returns 401 for malformed Authorization header (not Bearer)', async () => {
+    const env = createMockEnv();
+    const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
+    app.use('/v1/*', authMiddleware);
+    app.get('/v1/test', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/test', {
+      method: 'GET',
+      headers: { Authorization: 'NotBearer xyz123' },
+    }, env);
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'Invalid Authorization header format' });
+  });
+
+  it('returns 401 for empty Bearer token', async () => {
+    const env = createMockEnv();
+    const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
+    app.use('/v1/*', authMiddleware);
+    app.get('/v1/test', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/test', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' },
+    }, env);
+
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for Authorization header with too many parts', async () => {
+    const env = createMockEnv();
+    const app = new Hono<{ Bindings: Env; Variables: { user_id: string; email: string } }>();
+    app.use('/v1/*', authMiddleware);
+    app.get('/v1/test', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/test', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer token extra' },
+    }, env);
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'Invalid Authorization header format' });
+  });
 });

@@ -194,3 +194,32 @@ class TestQueueConsumerPollOnce:
         mock_d1.update_batch_status.assert_called_once_with(
             batch_id="b1", status="processing"
         )
+
+    async def test_dispatch_exception_acks_message(self):
+        """When dispatch_fn raises, message is still acked (not nacked)."""
+        consumer = self._make_consumer()
+
+        msg = QueueMessage(
+            message_id="msg-err",
+            lease_id="lease-err",
+            body={"batch_id": "b-err", "user_id": "u1", "priority": "normal"},
+        )
+
+        async def fake_pull(queue_id, client):
+            if queue_id == "priority-queue-id":
+                return [msg]
+            return []
+
+        consumer._pull_messages = fake_pull
+        consumer._ack_message = AsyncMock()
+        consumer._nack_message = AsyncMock()
+
+        mock_d1 = AsyncMock()
+        mock_dispatch = AsyncMock(side_effect=RuntimeError("pipeline boom"))
+
+        count = await consumer.poll_once(mock_dispatch, mock_d1)
+
+        assert count == 1
+        mock_dispatch.assert_called_once_with("b-err", "u1")
+        consumer._ack_message.assert_called_once()
+        consumer._nack_message.assert_not_called()

@@ -1,7 +1,9 @@
 """Tests for audio_processor.queue.consumer module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from audio_processor.queue.consumer import (
@@ -223,3 +225,90 @@ class TestQueueConsumerPollOnce:
         mock_dispatch.assert_called_once_with("b-err", "u1")
         consumer._ack_message.assert_called_once()
         consumer._nack_message.assert_not_called()
+
+
+class TestQueueConsumerPullMessages:
+    """Tests for QueueConsumer._pull_messages() HTTP response parsing."""
+
+    def _make_consumer(self) -> QueueConsumer:
+        return QueueConsumer(
+            queue_api_url="https://api.cloudflare.com/client/v4/accounts/123",
+            queue_id_priority="priority-queue-id",
+            queue_id_normal="normal-queue-id",
+            cf_api_token="test-token",
+        )
+
+    def _make_client(self, response_body: dict) -> httpx.AsyncClient:
+        """Build an AsyncClient backed by a MockTransport that returns response_body."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=response_body,
+                request=request,
+            )
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    async def test_body_as_json_string_is_parsed_to_dict(self):
+        """CF Queue HTTP API returns body as JSON string; _pull_messages parses it."""
+        payload = {
+            "batch_id": "b-123",
+            "user_id": "u-1",
+            "priority": "normal",
+            "enqueued_at": "2026-02-26T06:00:00Z",
+        }
+        cf_response = {
+            "result": {
+                "messages": [
+                    {
+                        "id": "msg-1",
+                        "lease_id": "lease-1",
+                        "body": json.dumps(payload),  # CF sends body as a JSON string
+                    }
+                ]
+            }
+        }
+        consumer = self._make_consumer()
+        async with self._make_client(cf_response) as client:
+            messages = await consumer._pull_messages("normal-queue-id", client)
+
+        assert len(messages) == 1
+        assert isinstance(messages[0].body, dict)
+        assert messages[0].body["batch_id"] == "b-123"
+        assert messages[0].body["user_id"] == "u-1"
+
+    async def test_body_already_dict_is_passed_through(self):
+        """If body is already a dict, it is used as-is."""
+        payload = {
+            "batch_id": "b-456",
+            "user_id": "u-2",
+            "priority": "immediate",
+        }
+        cf_response = {
+            "result": {
+                "messages": [
+                    {
+                        "id": "msg-2",
+                        "lease_id": "lease-2",
+                        "body": payload,  # Already a dict
+                    }
+                ]
+            }
+        }
+        consumer = self._make_consumer()
+        async with self._make_client(cf_response) as client:
+            messages = await consumer._pull_messages("normal-queue-id", client)
+
+        assert len(messages) == 1
+        assert isinstance(messages[0].body, dict)
+        assert messages[0].body["batch_id"] == "b-456"
+
+    async def test_empty_queue_returns_empty_list(self):
+        """Empty queue response (no messages key) returns empty list."""
+        cf_response = {"result": {"messages": []}}
+        consumer = self._make_consumer()
+        async with self._make_client(cf_response) as client:
+            messages = await consumer._pull_messages("normal-queue-id", client)
+
+        assert messages == []

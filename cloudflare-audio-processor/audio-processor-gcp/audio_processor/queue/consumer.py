@@ -8,6 +8,7 @@ dispatched to the pipeline, then acked or nacked.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -157,14 +158,17 @@ class QueueConsumer:
         messages: list[QueueMessage] = []
         for msg in messages_data:
             try:
+                raw_body = msg["body"]
+                # CF Queue HTTP API returns body as a JSON string; parse it.
+                body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
                 messages.append(
                     QueueMessage(
                         message_id=msg["id"],
                         lease_id=msg["lease_id"],
-                        body=msg["body"],
+                        body=body,
                     )
                 )
-            except (KeyError, TypeError) as exc:
+            except (KeyError, TypeError, json.JSONDecodeError) as exc:
                 logger.warning("Malformed queue message structure: %s", exc)
 
         return messages

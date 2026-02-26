@@ -32,7 +32,6 @@ class UploadWorkerTest {
     private lateinit var recordingRepository: RecordingRepository
     private lateinit var cloudStorage: CloudStorageProvider
     private lateinit var fileManager: FileManager
-    private lateinit var worker: UploadWorker
 
     @Before
     fun setUp() {
@@ -127,9 +126,8 @@ class UploadWorkerTest {
         coEvery { fileManager.writeMetadataSidecar(any(), any()) } returns metadataFile
         coEvery { cloudStorage.upload(any(), any(), any()) } returns UploadResult(
             success = true,
-            audioFileId = "fileId123"
+            batchId = "20260225-143000-a3f2"
         )
-        coEvery { cloudStorage.verifyUpload(any(), any()) } returns true
 
         worker.doWork()
 
@@ -137,15 +135,16 @@ class UploadWorkerTest {
     }
 
     @Test
-    fun `doWork updates status to uploaded on success`() = runTest {
+    fun `doWork updates status to uploaded on success and saves batch_id`() = runTest {
         val tempFile = File.createTempFile("test", ".m4a")
         tempFile.deleteOnExit()
         val metadataFile = File.createTempFile("metadata", ".json")
         metadataFile.deleteOnExit()
 
         val worker = createWorker()
-        val recording = createRecordingEntity(filePath = tempFile.absolutePath, md5Hash = "abc123")
+        val recording = createRecordingEntity(filePath = tempFile.absolutePath)
         val recordingWithMetadata = RecordingWithMetadata(recording, emptyList(), emptyList())
+        val batchId = "20260225-143000-a3f2"
 
         coEvery { cloudStorage.isAuthenticated() } returns true
         coEvery { recordingRepository.getById(1L) } returns recording
@@ -153,41 +152,14 @@ class UploadWorkerTest {
         coEvery { fileManager.writeMetadataSidecar(any(), any()) } returns metadataFile
         coEvery { cloudStorage.upload(any(), any(), any()) } returns UploadResult(
             success = true,
-            audioFileId = "fileId123"
+            batchId = batchId
         )
-        coEvery { cloudStorage.verifyUpload("fileId123", "abc123") } returns true
 
         val result = worker.doWork()
 
         assertEquals(ListenableWorker.Result.success(), result)
         coVerify { recordingRepository.updateUploadStatus(1L, RecordingEntity.UploadStatus.UPLOADED) }
-    }
-
-    @Test
-    fun `doWork retries on verification failure`() = runTest {
-        val tempFile = File.createTempFile("test", ".m4a")
-        tempFile.deleteOnExit()
-        val metadataFile = File.createTempFile("metadata", ".json")
-        metadataFile.deleteOnExit()
-
-        val worker = createWorker()
-        val recording = createRecordingEntity(filePath = tempFile.absolutePath, md5Hash = "abc123")
-        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList(), emptyList())
-
-        coEvery { cloudStorage.isAuthenticated() } returns true
-        coEvery { recordingRepository.getById(1L) } returns recording
-        coEvery { recordingRepository.getWithMetadata(1L) } returns recordingWithMetadata
-        coEvery { fileManager.writeMetadataSidecar(any(), any()) } returns metadataFile
-        coEvery { cloudStorage.upload(any(), any(), any()) } returns UploadResult(
-            success = true,
-            audioFileId = "fileId123"
-        )
-        coEvery { cloudStorage.verifyUpload("fileId123", "abc123") } returns false
-
-        val result = worker.doWork()
-
-        assertEquals(ListenableWorker.Result.retry(), result)
-        coVerify { recordingRepository.updateUploadStatus(1L, RecordingEntity.UploadStatus.PENDING) }
+        coVerify { recordingRepository.updateBatchId(1L, batchId) }
     }
 
     @Test

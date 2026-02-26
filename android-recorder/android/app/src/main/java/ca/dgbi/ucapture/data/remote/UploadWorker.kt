@@ -1,6 +1,8 @@
 package ca.dgbi.ucapture.data.remote
 
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -10,12 +12,11 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import android.util.Log
+import ca.dgbi.ucapture.BuildConfig
 import ca.dgbi.ucapture.data.local.entity.RecordingEntity
 import ca.dgbi.ucapture.data.model.RecordingMetadata
 import ca.dgbi.ucapture.data.repository.RecordingRepository
 import ca.dgbi.ucapture.util.FileManager
-import ca.dgbi.ucapture.util.HashUtil
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
@@ -133,30 +134,10 @@ class UploadWorker @AssistedInject constructor(
                 }
             }
 
-            // Verify upload if we have MD5 hash
-            val audioFileId = uploadResult.audioFileId!!
-            val md5Hash = recording.md5Hash ?: HashUtil.md5(audioFile)
-
-            if (md5Hash != null) {
-                val verified = cloudStorage.verifyUpload(audioFileId, md5Hash)
-                if (!verified) {
-                    // Verification failed - retry
-                    recordingRepository.updateUploadStatus(
-                        recordingId,
-                        RecordingEntity.UploadStatus.PENDING
-                    )
-                    return Result.retry()
-                }
-            }
-
-            // Success!
-            Log.d("UploadWorker", "Upload successful for recording $recordingId")
+            // Success — persist batch_id for transcript polling
+            Log.d("UploadWorker", "Upload successful for recording $recordingId, batch_id=${uploadResult.batchId}")
             recordingRepository.updateUploadStatus(recordingId, RecordingEntity.UploadStatus.UPLOADED)
-
-            // Update MD5 hash if we calculated it
-            if (recording.md5Hash == null && md5Hash != null) {
-                recordingRepository.updateMd5Hash(recordingId, md5Hash)
-            }
+            uploadResult.batchId?.let { recordingRepository.updateBatchId(recordingId, it) }
 
             return Result.success()
 
@@ -172,13 +153,19 @@ class UploadWorker @AssistedInject constructor(
     }
 
     private suspend fun prepareMetadataSidecar(recording: RecordingEntity): File? {
-        val recordingWithMetadata = recordingRepository.getWithMetadata(recording.id)
-        if (recordingWithMetadata == null) return null
+        val recordingWithMetadata = recordingRepository.getWithMetadata(recording.id) ?: return null
+
+        val deviceInfo = RecordingMetadata.DeviceInfo(
+            model = Build.MODEL ?: "unknown",
+            osVersion = "Android ${Build.VERSION.RELEASE ?: "unknown"}",
+            appVersion = BuildConfig.VERSION_NAME ?: "unknown"
+        )
 
         val metadata = RecordingMetadata.fromEntities(
             recording = recordingWithMetadata.recording,
             locationSamples = recordingWithMetadata.locationSamples,
-            calendarEvents = recordingWithMetadata.calendarEvents
+            calendarEvents = recordingWithMetadata.calendarEvents,
+            deviceInfo = deviceInfo
         )
 
         return fileManager.writeMetadataSidecar(recording.filePath, metadata)

@@ -3,7 +3,6 @@ package ca.dgbi.ucapture.util
 import android.content.Context
 import android.os.StatFs
 import ca.dgbi.ucapture.data.model.RecordingMetadata
-import com.google.gson.GsonBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -25,8 +24,6 @@ class FileManager @Inject constructor(
         const val LOW_STORAGE_THRESHOLD_MB = 100L
         const val CRITICAL_STORAGE_THRESHOLD_MB = 50L
     }
-
-    private val gson = GsonBuilder().setPrettyPrinting().create()
 
     val recordingsDirectory: File
         get() = File(context.filesDir, RECORDINGS_DIR).apply { mkdirs() }
@@ -109,27 +106,15 @@ class FileManager @Inject constructor(
     suspend fun writeMetadataSidecar(audioFilePath: String, metadata: RecordingMetadata): File =
         withContext(Dispatchers.IO) {
             val sidecarFile = getMetadataSidecarFile(audioFilePath)
-            val json = gson.toJson(metadata)
-            sidecarFile.writeText(json)
+            sidecarFile.writeText(metadata.toJson())
             sidecarFile
         }
 
     /**
-     * Read metadata JSON sidecar file.
-     *
-     * @return The parsed metadata, or null if file doesn't exist or is invalid
+     * Check whether a metadata sidecar exists for the given audio file path.
      */
-    suspend fun readMetadataSidecar(audioFilePath: String): RecordingMetadata? =
-        withContext(Dispatchers.IO) {
-            val sidecarFile = getMetadataSidecarFile(audioFilePath)
-            if (!sidecarFile.exists()) return@withContext null
-
-            try {
-                gson.fromJson(sidecarFile.readText(), RecordingMetadata::class.java)
-            } catch (e: Exception) {
-                null
-            }
-        }
+    fun hasMetadataSidecar(audioFilePath: String): Boolean =
+        getMetadataSidecarFile(audioFilePath).exists()
 
     /**
      * List all recording files sorted by modification time (newest first).

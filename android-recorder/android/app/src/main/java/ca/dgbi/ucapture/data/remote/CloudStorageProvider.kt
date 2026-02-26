@@ -79,8 +79,11 @@ interface CloudStorageProvider {
  */
 data class UploadResult(
     val success: Boolean,
+    /** Drive file ID (Drive provider) or batch_id (Cloudflare Worker provider). */
     val audioFileId: String? = null,
     val metadataFileId: String? = null,
+    /** Cloudflare Worker batch_id returned on HTTP 202. */
+    val batchId: String? = null,
     val error: UploadError? = null
 )
 

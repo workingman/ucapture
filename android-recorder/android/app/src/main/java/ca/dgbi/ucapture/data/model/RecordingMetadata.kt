@@ -3,145 +3,141 @@ package ca.dgbi.ucapture.data.model
 import ca.dgbi.ucapture.data.local.entity.CalendarEventEntity
 import ca.dgbi.ucapture.data.local.entity.LocationSampleEntity
 import ca.dgbi.ucapture.data.local.entity.RecordingEntity
-import com.google.gson.Gson
+import com.google.gson.FieldNamingPolicy
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
-import java.io.File
 import java.time.Instant
-import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
 
 /**
- * Aggregated metadata for a recording, suitable for JSON export.
+ * Aggregated metadata for a recording, matching the Cloudflare Worker upload API schema.
  *
- * This is the structure written to sidecar files and uploaded to cloud storage
- * alongside the audio file.
+ * Uploaded as a JSON file part alongside the audio in the multipart POST to /v1/upload.
+ * All timestamps are UTC ISO 8601 strings (e.g. "2026-02-25T14:30:00Z").
  */
 data class RecordingMetadata(
-    val version: Int = 1,
     val recording: RecordingInfo,
-    val location: LocationInfo?,
-    val calendar: CalendarInfo?
+    val device: DeviceInfo,
+    val location: LocationInfo? = null,
+    val calendar: CalendarInfo? = null
 ) {
+    /**
+     * Core recording parameters. Field names use camelCase here and are serialized
+     * as snake_case by the FieldNamingPolicy configured in [toJson].
+     */
     data class RecordingInfo(
-        val sessionId: String,
-        val chunkNumber: Int,
-        val filename: String,
-        val startTime: String,
-        val endTime: String,
-        val durationSeconds: Long,
-        val fileSizeBytes: Long,
-        val md5Hash: String?
+        val startedAt: String,
+        val endedAt: String,
+        val durationSeconds: Double,
+        val audioFormat: String = "aac",
+        val sampleRate: Int = 44100,
+        val channels: Int = 1,
+        val bitrate: Int = 128000,
+        val fileSizeBytes: Long
     )
 
+    data class DeviceInfo(
+        val model: String,
+        val osVersion: String,
+        val appVersion: String
+    )
+
+    /** Single best-accuracy GPS point captured during the recording. */
     data class LocationInfo(
-        val sampleCount: Int,
-        val samples: List<LocationSampleInfo>
-    )
-
-    data class LocationSampleInfo(
         val latitude: Double,
         val longitude: Double,
-        val altitude: Double?,
-        val accuracy: Float,
-        val speed: Float?,
-        val bearing: Float?,
-        val timestamp: String,
-        val provider: String
+        val accuracyMeters: Float,
+        val capturedAt: String,
+        val address: String? = null
     )
 
+    /** First calendar event that overlaps with the recording. */
     data class CalendarInfo(
-        val eventCount: Int,
-        val events: List<CalendarEventInfo>
+        val eventId: String,
+        val eventTitle: String,
+        val attendees: List<String>
     )
 
-    data class CalendarEventInfo(
-        val eventId: Long,
-        val title: String,
-        val description: String?,
-        val location: String?,
-        val startTime: String,
-        val endTime: String,
-        val attendees: List<String>,
-        val calendarName: String,
-        val isAllDay: Boolean
-    )
+    /**
+     * Serialize to JSON string, omitting optional sections that are null.
+     *
+     * Uses LOWER_CASE_WITH_UNDERSCORES naming so Kotlin camelCase fields
+     * (e.g. [RecordingInfo.startedAt]) map to snake_case keys in the output
+     * (e.g. `started_at`) as required by the Worker Zod schema.
+     */
+    fun toJson(): String {
+        val gson = GsonBuilder()
+            .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+            .setPrettyPrinting()
+            .create()
+
+        val root = JsonObject()
+        root.add("recording", gson.toJsonTree(recording))
+        root.add("device", gson.toJsonTree(device))
+        location?.let { root.add("location", gson.toJsonTree(it)) }
+        calendar?.let { root.add("calendar", gson.toJsonTree(it)) }
+        return gson.toJson(root)
+    }
 
     companion object {
-        private val isoFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-        private val gson = Gson()
+        // Reuse a single Gson instance for attendees list parsing (field names irrelevant for List<String>)
+        private val gson = GsonBuilder()
+            .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+            .create()
 
         /**
-         * Build RecordingMetadata from Room entities.
+         * Build [RecordingMetadata] from Room entities.
+         *
+         * @param recording       The recording entity
+         * @param locationSamples GPS samples collected during this chunk — the most-accurate
+         *                        sample (lowest accuracy radius) is included in the output
+         * @param calendarEvents  Events overlapping this chunk — the first is included
+         * @param deviceInfo      Device model, OS version, and app version
          */
         fun fromEntities(
             recording: RecordingEntity,
             locationSamples: List<LocationSampleEntity>,
-            calendarEvents: List<CalendarEventEntity>
+            calendarEvents: List<CalendarEventEntity>,
+            deviceInfo: DeviceInfo
         ): RecordingMetadata {
-            val timezone = ZoneId.of(recording.timezoneId)
+            val startedAt = Instant.ofEpochMilli(recording.startTimeEpochMilli).toString()
+            val endedAt = Instant.ofEpochMilli(recording.endTimeEpochMilli).toString()
+
+            // Best accuracy = smallest radius in metres
+            val locationInfo = locationSamples
+                .minByOrNull { it.accuracy }
+                ?.let { sample ->
+                    LocationInfo(
+                        latitude = sample.latitude,
+                        longitude = sample.longitude,
+                        accuracyMeters = sample.accuracy,
+                        capturedAt = Instant.ofEpochMilli(sample.timestampEpochMilli).toString()
+                    )
+                }
+
+            val calendarInfo = calendarEvents.firstOrNull()?.let { event ->
+                val attendees: List<String> = try {
+                    gson.fromJson(event.attendeesJson, object : TypeToken<List<String>>() {}.type)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                CalendarInfo(
+                    eventId = event.eventId.toString(),
+                    eventTitle = event.title,
+                    attendees = attendees
+                )
+            }
 
             return RecordingMetadata(
                 recording = RecordingInfo(
-                    sessionId = recording.sessionId,
-                    chunkNumber = recording.chunkNumber,
-                    filename = File(recording.filePath).name,
-                    startTime = formatTime(recording.startTimeEpochMilli, timezone),
-                    endTime = formatTime(recording.endTimeEpochMilli, timezone),
-                    durationSeconds = recording.durationSeconds,
-                    fileSizeBytes = recording.fileSizeBytes,
-                    md5Hash = recording.md5Hash
+                    startedAt = startedAt,
+                    endedAt = endedAt,
+                    durationSeconds = recording.durationSeconds.toDouble(),
+                    fileSizeBytes = recording.fileSizeBytes
                 ),
-                location = if (locationSamples.isNotEmpty()) {
-                    LocationInfo(
-                        sampleCount = locationSamples.size,
-                        samples = locationSamples.map { it.toInfo() }
-                    )
-                } else null,
-                calendar = if (calendarEvents.isNotEmpty()) {
-                    CalendarInfo(
-                        eventCount = calendarEvents.size,
-                        events = calendarEvents.map { it.toInfo() }
-                    )
-                } else null
-            )
-        }
-
-        private fun formatTime(epochMilli: Long, zone: ZoneId): String {
-            return ZonedDateTime.ofInstant(
-                Instant.ofEpochMilli(epochMilli),
-                zone
-            ).format(isoFormatter)
-        }
-
-        private fun LocationSampleEntity.toInfo() = LocationSampleInfo(
-            latitude = latitude,
-            longitude = longitude,
-            altitude = altitude,
-            accuracy = accuracy,
-            speed = speed,
-            bearing = bearing,
-            timestamp = Instant.ofEpochMilli(timestampEpochMilli).toString(),
-            provider = provider
-        )
-
-        private fun CalendarEventEntity.toInfo(): CalendarEventInfo {
-            val attendees: List<String> = try {
-                gson.fromJson(attendeesJson, object : TypeToken<List<String>>() {}.type)
-            } catch (e: Exception) {
-                emptyList()
-            }
-
-            return CalendarEventInfo(
-                eventId = eventId,
-                title = title,
-                description = description,
-                location = location,
-                startTime = Instant.ofEpochMilli(startTimeEpochMilli).toString(),
-                endTime = Instant.ofEpochMilli(endTimeEpochMilli).toString(),
-                attendees = attendees,
-                calendarName = calendarName,
-                isAllDay = isAllDay
+                device = deviceInfo,
+                location = locationInfo,
+                calendar = calendarInfo
             )
         }
     }

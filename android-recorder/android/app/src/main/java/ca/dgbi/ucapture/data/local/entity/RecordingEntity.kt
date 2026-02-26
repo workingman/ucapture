@@ -53,6 +53,10 @@ data class RecordingEntity(
     @ColumnInfo(name = "upload_status")
     val uploadStatus: String = UploadStatus.PENDING,
 
+    /** Cloudflare Worker batch_id returned on successful upload (null until uploaded). */
+    @ColumnInfo(name = "batch_id")
+    val batchId: String? = null,
+
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis()
 ) {

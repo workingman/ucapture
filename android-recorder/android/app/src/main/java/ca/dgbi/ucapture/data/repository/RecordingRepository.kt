@@ -91,6 +91,9 @@ class RecordingRepository @Inject constructor(
     suspend fun updateMd5Hash(id: Long, hash: String) =
         recordingDao.updateMd5Hash(id, hash)
 
+    suspend fun updateBatchId(id: Long, batchId: String) =
+        recordingDao.updateBatchId(id, batchId)
+
     suspend fun getPendingUploads(): List<RecordingEntity> =
         recordingDao.getByUploadStatus(RecordingEntity.UploadStatus.PENDING)
 

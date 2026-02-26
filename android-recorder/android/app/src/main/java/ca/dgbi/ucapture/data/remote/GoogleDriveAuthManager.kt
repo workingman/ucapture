@@ -315,4 +315,12 @@ class GoogleDriveAuthManager @Inject constructor(
     suspend fun getCurrentAccountEmail(): String? = mutex.withLock {
         currentAccountEmail
     }
+
+    /**
+     * Get the current OAuth access token, or null if not signed in.
+     *
+     * Used by [ca.dgbi.ucapture.data.remote.CloudflareWorkerStorage] to attach
+     * a Bearer token to the Worker upload request.
+     */
+    suspend fun getAccessToken(): String? = mutex.withLock { accessToken }
 }

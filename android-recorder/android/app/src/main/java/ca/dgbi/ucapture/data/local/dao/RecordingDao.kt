@@ -43,6 +43,9 @@ interface RecordingDao {
     @Query("UPDATE recordings SET md5_hash = :hash WHERE id = :id")
     suspend fun updateMd5Hash(id: Long, hash: String)
 
+    @Query("UPDATE recordings SET batch_id = :batchId WHERE id = :id")
+    suspend fun updateBatchId(id: Long, batchId: String)
+
     @Query("SELECT SUM(file_size_bytes) FROM recordings")
     suspend fun getTotalStorageUsed(): Long?
 

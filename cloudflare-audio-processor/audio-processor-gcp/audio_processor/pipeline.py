@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+import httpx
+
 from audio_processor.asr.interface import Transcript
 from audio_processor.asr.postprocess import insert_timestamp_markers
 from audio_processor.asr.registry import get_asr_engine
@@ -27,7 +29,7 @@ from audio_processor.emotion.runner import run_emotion_analysis
 from audio_processor.observability.metrics import BatchMetrics, log_batch_metrics
 from audio_processor.storage.d1_client import D1Client
 from audio_processor.storage.r2_client import R2Client
-from audio_processor.utils.errors import PipelineError
+from audio_processor.utils.errors import ASRError, PipelineError
 from audio_processor.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -760,13 +762,21 @@ def _build_completion_event(
     return event
 
 
-@retry_with_backoff(max_retries=3, base_delay=1.0)
+@retry_with_backoff(
+    max_retries=3,
+    base_delay=1.0,
+    retryable_exceptions=(httpx.RequestError, httpx.HTTPStatusError),
+)
 async def _fetch_with_retry(r2_client: R2Client, key: str) -> bytes:
     """Fetch an object from R2 with retry."""
     return r2_client.fetch_object(key)
 
 
-@retry_with_backoff(max_retries=3, base_delay=1.0)
+@retry_with_backoff(
+    max_retries=3,
+    base_delay=1.0,
+    retryable_exceptions=(ASRError, httpx.RequestError),
+)
 async def _transcribe_with_retry(
     asr_engine: Any, audio_path: str, metadata: dict
 ) -> Transcript:
@@ -774,7 +784,11 @@ async def _transcribe_with_retry(
     return await asr_engine.transcribe(audio_path, metadata)
 
 
-@retry_with_backoff(max_retries=3, base_delay=1.0)
+@retry_with_backoff(
+    max_retries=3,
+    base_delay=1.0,
+    retryable_exceptions=(httpx.RequestError, httpx.HTTPStatusError),
+)
 async def _put_with_retry(
     r2_client: R2Client,
     key: str,

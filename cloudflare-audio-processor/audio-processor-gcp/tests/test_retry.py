@@ -106,3 +106,142 @@ class TestRetryWithBackoff:
             await fail_once()
 
         assert call_count == 1
+
+
+class TestRetryableExceptions:
+    """Tests for transient vs permanent failure classification."""
+
+    @pytest.mark.asyncio
+    async def test_permanent_failure_not_retried(self) -> None:
+        """Non-retryable exception re-raises immediately without retry."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=3,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def raise_permanent() -> None:
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("permanent failure")
+
+        with pytest.raises(ValueError, match="permanent failure"):
+            await raise_permanent()
+
+        assert call_count == 1  # No retries for permanent failures
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_retried(self) -> None:
+        """Retryable exception is retried up to max_retries."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=2,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def raise_transient() -> None:
+            nonlocal call_count
+            call_count += 1
+            raise ConnectionError("transient failure")
+
+        with pytest.raises(ConnectionError, match="transient failure"):
+            await raise_transient()
+
+        # 1 initial + 2 retries = 3 total calls
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_transient_then_success(self) -> None:
+        """Retryable exception followed by success returns result."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=3,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def fail_once_then_succeed() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ConnectionError("transient")
+            return "ok"
+
+        result = await fail_once_then_succeed()
+        assert result == "ok"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_count_attached_on_exhaustion(self) -> None:
+        """_retry_count is set to max_retries when retries are exhausted."""
+
+        @retry_with_backoff(
+            max_retries=2,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def always_fail() -> None:
+            raise ConnectionError("fail")
+
+        with pytest.raises(ConnectionError) as exc_info:
+            await always_fail()
+
+        assert exc_info.value._retry_count == 2  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_retry_count_attached_on_permanent_failure(self) -> None:
+        """_retry_count is set to current attempt on permanent failure."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=3,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def transient_then_permanent() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ConnectionError("transient")
+            raise ValueError("permanent")
+
+        with pytest.raises(ValueError, match="permanent"):
+            await transient_then_permanent()
+
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_count_zero_on_immediate_permanent(self) -> None:
+        """_retry_count is 0 when permanent failure occurs on first attempt."""
+
+        @retry_with_backoff(
+            max_retries=3,
+            base_delay=0.01,
+            retryable_exceptions=(ConnectionError,),
+        )
+        async def immediate_permanent() -> None:
+            raise ValueError("permanent on first try")
+
+        with pytest.raises(ValueError) as exc_info:
+            await immediate_permanent()
+
+        assert exc_info.value._retry_count == 0  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_none_retryable_exceptions_retries_all(self) -> None:
+        """When retryable_exceptions is None, all exceptions are retried (legacy)."""
+        call_count = 0
+
+        @retry_with_backoff(max_retries=2, base_delay=0.01)
+        async def always_fail() -> None:
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("fail")
+
+        with pytest.raises(ValueError):
+            await always_fail()
+
+        # 1 initial + 2 retries = 3 total calls
+        assert call_count == 3

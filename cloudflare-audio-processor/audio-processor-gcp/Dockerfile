@@ -17,14 +17,15 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# Create non-root user before COPY so --chown works
+RUN useradd --create-home appuser
+
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application code
-COPY audio_processor/ audio_processor/
+# Copy application code with correct ownership
+COPY --chown=appuser:appuser audio_processor/ audio_processor/
 
-# Run as non-root user
-RUN useradd --create-home appuser
 USER appuser
 
 # Cloud Run uses PORT env var (default 8080)

@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import javax.inject.Inject
 
@@ -83,6 +85,7 @@ class RecordingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var durationJob: Job? = null
     private var currentQuality: AudioRecorder.Quality = AudioRecorder.Quality.MEDIUM
+    private var chunkProcessingComplete: kotlinx.coroutines.channels.Channel<Unit>? = null
 
     private val _state = MutableStateFlow(State.IDLE)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -180,9 +183,16 @@ class RecordingService : Service() {
 
             // Subscribe to completed chunks for persistence
             chunkCollectionJob?.cancel()
+            chunkProcessingComplete = kotlinx.coroutines.channels.Channel(1)
             chunkCollectionJob = serviceScope.launch {
                 chunkManager.completedChunks.collect { completedChunk ->
                     persistCompletedChunk(completedChunk)
+                    // Signal that chunk processing is complete
+                    try {
+                        chunkProcessingComplete?.send(Unit)
+                    } catch (e: Exception) {
+                        // Channel may be closed if we're shutting down
+                    }
                 }
             }
         } catch (e: AudioRecorder.AudioRecorderException) {
@@ -279,20 +289,28 @@ class RecordingService : Service() {
             chunkManager.reset()
         }
 
-        // Now safe to cancel the chunk collector (after endSession emitted)
-        // Give a brief moment for the emission to be processed
-        serviceScope.launch {
-            kotlinx.coroutines.delay(100)
-            chunkCollectionJob?.cancel()
-            chunkCollectionJob = null
-            metadataCollectorManager.stopAll()
-        }
-
+        // Wait for the final chunk to be fully persisted before stopping service
         _state.value = State.STOPPED
         releaseWakeLock()
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        serviceScope.launch {
+            try {
+                // Wait up to 5 seconds for chunk processing to complete
+                kotlinx.coroutines.withTimeoutOrNull(5000) {
+                    chunkProcessingComplete?.receive()
+                }
+            } catch (e: Exception) {
+                // Timeout or channel closed - proceed anyway
+            } finally {
+                chunkCollectionJob?.cancel()
+                chunkCollectionJob = null
+                chunkProcessingComplete?.close()
+                chunkProcessingComplete = null
+                metadataCollectorManager.stopAll()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
 
         return file
     }

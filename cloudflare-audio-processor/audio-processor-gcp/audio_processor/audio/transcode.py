@@ -29,6 +29,9 @@ class TranscodeResult:
     duration_seconds: float
 
 
+FFPROBE_TIMEOUT_SECONDS = 10
+
+
 def _check_ffmpeg_available() -> str:
     """Verify ffmpeg is available on the system.
 
@@ -42,6 +45,51 @@ def _check_ffmpeg_available() -> str:
     if ffmpeg_path is None:
         raise TranscodeError("ffmpeg binary not found on PATH")
     return ffmpeg_path
+
+
+def _check_audio_valid(input_path: str) -> None:
+    """Pre-validate audio file with ffprobe before transcoding.
+
+    Runs ffprobe with a short timeout to detect corrupt files quickly
+    instead of waiting for ffmpeg's 120-second timeout.
+
+    Args:
+        input_path: Path to the audio file to validate.
+
+    Raises:
+        TranscodeError: If ffprobe fails or the file is corrupt.
+    """
+    ffprobe_path = shutil.which("ffprobe")
+    if ffprobe_path is None:
+        # ffprobe not available — skip pre-check, let ffmpeg handle it
+        return
+
+    cmd = [
+        ffprobe_path,
+        "-v", "error",
+        "-show_format",
+        input_path,
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=FFPROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip() if exc.stderr else "unknown error"
+        raise TranscodeError(
+            f"Audio file is corrupt or unreadable (ffprobe): {stderr}",
+            input_path=input_path,
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise TranscodeError(
+            f"ffprobe timed out after {FFPROBE_TIMEOUT_SECONDS}s — file may be corrupt",
+            input_path=input_path,
+        ) from exc
 
 
 def _read_wav_duration(wav_path: str) -> float:
@@ -87,6 +135,9 @@ def transcode_to_wav(
 
     ffmpeg_path = _check_ffmpeg_available()
 
+    # Pre-validate with ffprobe to fail fast on corrupt audio
+    _check_audio_valid(input_path)
+
     if output_filename is None:
         output_filename = f"{input_file.stem}.wav"
 
@@ -123,8 +174,11 @@ def transcode_to_wav(
             input_path=input_path,
         ) from exc
     except subprocess.TimeoutExpired as exc:
+        stderr_snippet = ""
+        if exc.stderr:
+            stderr_snippet = f" stderr: {exc.stderr.strip()[:200]}"
         raise TranscodeError(
-            "ffmpeg transcode timed out after 120 seconds",
+            f"ffmpeg transcode timed out after 120 seconds.{stderr_snippet}",
             input_path=input_path,
         ) from exc
 

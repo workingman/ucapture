@@ -14,6 +14,7 @@ from audio_processor.audio.transcode import (
     TARGET_SAMPLE_RATE,
     TARGET_SAMPLE_WIDTH,
     TranscodeResult,
+    _check_audio_valid,
     transcode_to_wav,
 )
 from audio_processor.utils.errors import TranscodeError
@@ -128,3 +129,57 @@ class TestTranscodeValidation:
 
         with pytest.raises(TranscodeError, match="ffmpeg binary not found"):
             transcode_to_wav(valid_audio_file, output_dir)
+
+
+def _ffprobe_available() -> bool:
+    """Check if ffprobe is available on the system."""
+    return shutil.which("ffprobe") is not None
+
+
+@pytest.mark.skipif(not _ffprobe_available(), reason="ffprobe not available")
+class TestFfprobePreCheck:
+    """Tests for ffprobe pre-validation of audio files."""
+
+    def test_corrupt_audio_fails_fast_with_ffprobe(
+        self, corrupt_audio_file: str
+    ) -> None:
+        """Corrupt audio raises TranscodeError via ffprobe before ffmpeg runs."""
+        with pytest.raises(TranscodeError, match="corrupt or unreadable"):
+            _check_audio_valid(corrupt_audio_file)
+
+    def test_valid_audio_passes_ffprobe(
+        self, valid_audio_file: str
+    ) -> None:
+        """Valid audio file passes ffprobe pre-check without error."""
+        _check_audio_valid(valid_audio_file)  # Should not raise
+
+    @pytest.mark.skipif(
+        not _ffmpeg_available(), reason="ffmpeg not available"
+    )
+    def test_corrupt_audio_transcode_fails_fast(
+        self, corrupt_audio_file: str, output_dir: str
+    ) -> None:
+        """Full transcode pipeline fails fast on corrupt audio via ffprobe."""
+        with pytest.raises(TranscodeError, match="corrupt or unreadable"):
+            transcode_to_wav(corrupt_audio_file, output_dir)
+
+
+class TestFfprobeSkipped:
+    """Tests for when ffprobe is not available."""
+
+    def test_skips_precheck_when_ffprobe_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When ffprobe is not on PATH, pre-check is silently skipped."""
+        original_which = shutil.which
+
+        def mock_which(name: str):
+            if name == "ffprobe":
+                return None
+            return original_which(name)
+
+        monkeypatch.setattr(shutil, "which", mock_which)
+
+        # Should not raise even for a nonexistent path
+        # (just skips the check when ffprobe is missing)
+        _check_audio_valid("/some/file.m4a")

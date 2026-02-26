@@ -11,7 +11,7 @@ bucket_name = "audio-uploads"
 [[d1_databases]]
 binding = "DB"
 database_name = "audio-processor-db"
-database_id = "placeholder-id"
+database_id = "fd59bd11-517a-4d52-9314-e69f3d1dd293"
 
 # Queue for normal-priority processing jobs
 [[queues.producers]]
@@ -26,7 +26,7 @@ queue = "audio-processing-priority"
 # KV namespace for OAuth token cache
 [[kv_namespaces]]
 binding = "TOKEN_CACHE"
-id = "placeholder-id"
+id = "da2e446ff36748d99e924d5dfa1bc029"
 
 # Pub/Sub namespace for completion events (MQTT broker)
 # Cloudflare Pub/Sub is in beta and does not have standard wrangler.toml bindings.

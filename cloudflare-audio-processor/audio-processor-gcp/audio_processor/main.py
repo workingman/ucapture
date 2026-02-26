@@ -44,6 +44,9 @@ async def _health_handler(reader: StreamReader, writer: StreamWriter) -> None:
     writer.close()
 
 
+SHUTDOWN_TIMEOUT_SECONDS = 25
+
+
 async def _run(consumer: QueueConsumer, d1_client: D1Client) -> None:
     """Run the health server and queue consumer concurrently."""
     port = int(os.environ.get("PORT", "8080"))
@@ -67,7 +70,24 @@ async def _run(consumer: QueueConsumer, d1_client: D1Client) -> None:
         loop.add_signal_handler(sig, _shutdown)
 
     await stop_event.wait()
-    consumer_task.cancel()
+
+    # Wait for consumer task to finish with a timeout to avoid SIGKILL
+    try:
+        await asyncio.wait_for(consumer_task, timeout=SHUTDOWN_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Shutdown timed out after %ds — cancelling in-flight work. "
+            "Interrupted batch remains in 'processing' status for reprocessing.",
+            SHUTDOWN_TIMEOUT_SECONDS,
+        )
+        consumer_task.cancel()
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            pass
+    except asyncio.CancelledError:
+        pass
+
     server.close()
     await server.wait_closed()
 

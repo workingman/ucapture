@@ -27,7 +27,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
@@ -75,6 +75,9 @@ class RecordingService : Service() {
     @Inject
     lateinit var locationCollector: LocationMetadataCollector
 
+    @Inject
+    lateinit var orphanRecoveryManager: OrphanRecoveryManager
+
     private var wakeLock: PowerManager.WakeLock? = null
     private var chunkCollectionJob: Job? = null
     private val binder = RecordingBinder()
@@ -95,7 +98,7 @@ class RecordingService : Service() {
     private val _currentChunkNumber = MutableStateFlow(0)
     val currentChunkNumber: StateFlow<Int> = _currentChunkNumber.asStateFlow()
 
-    val completedChunks: SharedFlow<ChunkManager.CompletedChunk>
+    val completedChunks: Flow<ChunkManager.CompletedChunk>
         get() = chunkManager.completedChunks
 
     inner class RecordingBinder : Binder() {
@@ -108,6 +111,14 @@ class RecordingService : Service() {
 
         val recordingsDir = File(filesDir, "recordings")
         chunkManager.configure(recordingsDir)
+
+        // Recover orphaned audio files from prior sessions
+        serviceScope.launch {
+            val recoveredIds = orphanRecoveryManager.recoverOrphans()
+            for (id in recoveredIds) {
+                scheduleUpload(id)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -167,17 +178,7 @@ class RecordingService : Service() {
             acquireWakeLock()
             startDurationTimer()
 
-            // Start chunk rotation timer
-            chunkManager.startChunkTimer(serviceScope) { newChunk ->
-                rotateToNewChunk(newChunk)
-            }
-
-            // Start metadata collectors
-            serviceScope.launch {
-                metadataCollectorManager.startAll()
-            }
-
-            // Subscribe to completed chunks for persistence
+            // Subscribe to completed chunks for persistence (before starting timer)
             chunkCollectionJob?.cancel()
             chunkProcessingComplete = kotlinx.coroutines.channels.Channel(1)
             chunkCollectionJob = serviceScope.launch {
@@ -190,6 +191,16 @@ class RecordingService : Service() {
                         // Channel may be closed if we're shutting down
                     }
                 }
+            }
+
+            // Start chunk rotation timer (after subscription is active)
+            chunkManager.startChunkTimer(serviceScope) { newChunk ->
+                rotateToNewChunk(newChunk)
+            }
+
+            // Start metadata collectors
+            serviceScope.launch {
+                metadataCollectorManager.startAll()
             }
         } catch (e: AudioRecorder.AudioRecorderException) {
             _state.value = State.IDLE

@@ -195,4 +195,27 @@ class ChunkManagerTest {
             chunk1.sessionId != chunk2.sessionId
         )
     }
+
+    @Test
+    fun `completedChunks channel never drops emissions`() = runTest {
+        // Emit many chunks without a collector — Channel.UNLIMITED should buffer all
+        val chunks = mutableListOf<ChunkManager.CompletedChunk>()
+        repeat(20) { i ->
+            chunkManager.startNewSession()
+            chunkManager.completeCurrentChunk()
+            // Reset to allow new session (endSession already called completeCurrentChunk,
+            // so use reset + startNewSession for subsequent iterations)
+            chunkManager.reset()
+        }
+
+        // Now collect — all 20 should be available
+        chunkManager.completedChunks.test {
+            repeat(20) {
+                val item = awaitItem()
+                chunks.add(item)
+            }
+        }
+
+        assertEquals(20, chunks.size)
+    }
 }

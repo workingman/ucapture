@@ -2,10 +2,13 @@ package ca.dgbi.ucapture.service
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -50,8 +53,8 @@ class ChunkManager @Inject constructor() {
     private var chunkTimerJob: Job? = null
     private var recordingsDir: File? = null
 
-    private val _completedChunks = MutableSharedFlow<CompletedChunk>(extraBufferCapacity = 10)
-    val completedChunks: SharedFlow<CompletedChunk> = _completedChunks.asSharedFlow()
+    private val _completedChunks = Channel<CompletedChunk>(Channel.UNLIMITED)
+    val completedChunks: Flow<CompletedChunk> = _completedChunks.receiveAsFlow()
 
     private val _chunkRotationRequired = MutableSharedFlow<ChunkInfo>(extraBufferCapacity = 1)
     val chunkRotationRequired: SharedFlow<ChunkInfo> = _chunkRotationRequired.asSharedFlow()
@@ -112,7 +115,7 @@ class ChunkManager @Inject constructor() {
             sessionId = chunk.sessionId
         )
 
-        _completedChunks.tryEmit(completed)
+        _completedChunks.trySend(completed)
         return completed
     }
 

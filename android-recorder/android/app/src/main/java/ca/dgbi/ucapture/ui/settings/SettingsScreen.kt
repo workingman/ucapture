@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextField
@@ -68,6 +69,11 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
+        StorageBackendSection(
+            useCloudflareWorker = uiState.useCloudflareWorker,
+            onToggle = { viewModel.toggleStorageBackend(it) }
+        )
+
         GoogleDriveSection(
             isSignedIn = uiState.isSignedIn,
             userEmail = uiState.userEmail,
@@ -90,6 +96,60 @@ fun SettingsScreen(
                 showFolderDialog = false
             }
         )
+    }
+}
+
+/**
+ * Storage backend selection showing Cloudflare Worker vs Google Drive.
+ */
+@Composable
+private fun StorageBackendSection(
+    useCloudflareWorker: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Upload Backend",
+                style = MaterialTheme.typography.titleLarge
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (useCloudflareWorker) "Cloudflare Worker" else "Google Drive",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = if (useCloudflareWorker)
+                            "Recommended — uploads to cloud processor"
+                        else
+                            "Fallback — uploads to Google Drive",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Switch(
+                    checked = useCloudflareWorker,
+                    onCheckedChange = onToggle
+                )
+            }
+        }
     }
 }
 

@@ -137,5 +137,5 @@ data class SettingsUiState(
     val currentFolderName: String? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val useCloudflareWorker: Boolean = true
+    val useCloudflareWorker: Boolean = false
 )

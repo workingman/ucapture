@@ -3,6 +3,7 @@ package ca.dgbi.ucapture.ui.settings
 import android.content.Context
 import app.cash.turbine.test
 import ca.dgbi.ucapture.data.remote.GoogleDriveAuthManager
+import ca.dgbi.ucapture.data.preferences.StoragePreferences
 import ca.dgbi.ucapture.data.remote.GoogleDriveStorage
 import ca.dgbi.ucapture.data.remote.UploadScheduler
 import io.mockk.coEvery
@@ -30,6 +31,7 @@ class SettingsViewModelTest {
     private lateinit var authManager: GoogleDriveAuthManager
     private lateinit var storage: GoogleDriveStorage
     private lateinit var uploadScheduler: UploadScheduler
+    private lateinit var storagePreferences: StoragePreferences
     private lateinit var viewModel: SettingsViewModel
     private lateinit var mockContext: Context
 
@@ -39,6 +41,7 @@ class SettingsViewModelTest {
         authManager = mockk()
         storage = mockk()
         uploadScheduler = mockk(relaxed = true)
+        storagePreferences = mockk(relaxed = true)
         mockContext = mockk(relaxed = true)
     }
 
@@ -53,7 +56,7 @@ class SettingsViewModelTest {
         coEvery { authManager.getCurrentAccountEmail() } returns null
         coEvery { storage.getTargetFolderName() } returns null
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.uiState.test {
@@ -71,7 +74,7 @@ class SettingsViewModelTest {
         coEvery { authManager.getCurrentAccountEmail() } returns "test@example.com"
         coEvery { storage.getTargetFolderName() } returns null
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.uiState.test {
@@ -89,7 +92,7 @@ class SettingsViewModelTest {
         coEvery { authManager.getCurrentAccountEmail() } returns "test@example.com"
         coEvery { storage.getTargetFolderName() } returns "My Recordings"
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.uiState.test {
@@ -105,7 +108,7 @@ class SettingsViewModelTest {
         coEvery { authManager.getCurrentAccountEmail() } returns "test@example.com"
         coEvery { storage.getTargetFolderName() } returns null
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.uiState.test {
@@ -132,7 +135,7 @@ class SettingsViewModelTest {
         coEvery { authManager.getCurrentAccountEmail() } returns "test@example.com"
         coEvery { storage.getTargetFolderName() } returns null
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.signIn(mockContext)
@@ -148,7 +151,7 @@ class SettingsViewModelTest {
         coEvery { authManager.signIn(any()) } returns false
         coEvery { storage.getTargetFolderName() } returns null
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.uiState.test {
@@ -174,7 +177,7 @@ class SettingsViewModelTest {
         coEvery { authManager.signOut() } returns Unit
         coEvery { storage.getTargetFolderName() } returns null
 
-        viewModel = SettingsViewModel(authManager, storage, uploadScheduler)
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
         advanceUntilIdle()
 
         viewModel.uiState.test {
@@ -192,5 +195,19 @@ class SettingsViewModelTest {
             assertFalse(signedOutState.isSignedIn)
             assertNull(signedOutState.userEmail)
         }
+    }
+
+    @Test
+    fun `toggleStorageBackend persists preference via storagePreferences`() = runTest {
+        coEvery { authManager.isSignedIn() } returns false
+        coEvery { storage.getTargetFolderName() } returns null
+
+        viewModel = SettingsViewModel(authManager, storage, uploadScheduler, storagePreferences)
+        advanceUntilIdle()
+
+        viewModel.toggleStorageBackend(false)
+        advanceUntilIdle()
+
+        coVerify { storagePreferences.setUseCloudflareWorker(false) }
     }
 }

@@ -24,7 +24,7 @@ class StoragePreferences @Inject constructor(
 ) {
     companion object {
         private val USE_CLOUDFLARE_WORKER = booleanPreferencesKey("use_cloudflare_worker")
-        private const val DEFAULT_USE_CLOUDFLARE = true
+        private const val DEFAULT_USE_CLOUDFLARE = false
     }
 
     /**

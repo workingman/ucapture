@@ -63,6 +63,9 @@ class RecordingRepository @Inject constructor(
         return recordingId
     }
 
+    suspend fun insertRecording(entity: RecordingEntity): Long =
+        recordingDao.insert(entity)
+
     suspend fun getById(id: Long): RecordingEntity? = recordingDao.getById(id)
 
     suspend fun getByFilePath(filePath: String): RecordingEntity? =

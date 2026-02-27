@@ -49,7 +49,6 @@ class RecordingViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isRecording = false,
-                    isPaused = false,
                     recordingDurationSeconds = 0
                 )
             }
@@ -62,7 +61,6 @@ class RecordingViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 isRecording = state == RecordingService.State.RECORDING,
-                isPaused = state == RecordingService.State.PAUSED,
                 recordingDurationSeconds = duration
             )
         }
@@ -89,6 +87,5 @@ class RecordingViewModel @Inject constructor(
  */
 data class RecordingUiState(
     val isRecording: Boolean = false,
-    val isPaused: Boolean = false,
     val recordingDurationSeconds: Long = 0
 )

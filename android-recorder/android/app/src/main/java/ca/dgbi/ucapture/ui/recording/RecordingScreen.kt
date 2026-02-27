@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FloatingActionButton
@@ -131,7 +130,6 @@ fun RecordingScreen(
 
     RecordingScreenContent(
         isRecording = uiState.isRecording,
-        isPaused = uiState.isPaused,
         durationText = viewModel.formatDuration(uiState.recordingDurationSeconds),
         pendingUploadCount = pendingUploadCount,
         onStartRecording = {
@@ -144,20 +142,6 @@ fun RecordingScreen(
             } else {
                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
-        },
-        onPauseRecording = {
-            // Send intent to service (survives unbind)
-            val intent = Intent(context, RecordingService::class.java).apply {
-                action = RecordingService.ACTION_PAUSE
-            }
-            context.startService(intent)
-        },
-        onResumeRecording = {
-            // Send intent to service (survives unbind)
-            val intent = Intent(context, RecordingService::class.java).apply {
-                action = RecordingService.ACTION_RESUME
-            }
-            context.startService(intent)
         },
         onStopRecording = {
             // Send intent to service (survives unbind)
@@ -175,12 +159,9 @@ fun RecordingScreen(
 @Composable
 private fun RecordingScreenContent(
     isRecording: Boolean,
-    isPaused: Boolean,
     durationText: String,
     pendingUploadCount: Int,
     onStartRecording: () -> Unit,
-    onPauseRecording: () -> Unit,
-    onResumeRecording: () -> Unit,
     onStopRecording: () -> Unit
 ) {
     Box(
@@ -202,7 +183,7 @@ private fun RecordingScreenContent(
                 text = durationText,
                 style = MaterialTheme.typography.displayLarge,
                 fontWeight = FontWeight.Bold,
-                color = if (isRecording && !isPaused) {
+                color = if (isRecording) {
                     MaterialTheme.colorScheme.error
                 } else {
                     MaterialTheme.colorScheme.onBackground
@@ -211,52 +192,28 @@ private fun RecordingScreenContent(
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // Record button - starts recording, or resumes if paused
+            // Record button
             RecordButton(
-                isRecording = isRecording && !isPaused,
-                onClick = if (isPaused) onResumeRecording else onStartRecording
+                isRecording = isRecording,
+                onClick = onStartRecording
             )
 
-            // Control buttons (when recording)
-            if (isRecording || isPaused) {
+            // Stop button (when recording)
+            if (isRecording) {
                 Spacer(modifier = Modifier.height(32.dp))
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                FloatingActionButton(
+                    onClick = onStopRecording,
+                    containerColor = MaterialTheme.colorScheme.error
                 ) {
-                    // Pause/Resume button
-                    FloatingActionButton(
-                        onClick = if (isPaused) onResumeRecording else onPauseRecording,
-                        containerColor = MaterialTheme.colorScheme.secondary
-                    ) {
-                        if (isPaused) {
-                            Icon(
-                                imageVector = Icons.Filled.PlayArrow,
-                                contentDescription = "Resume"
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onError,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
                             )
-                        } else {
-                            Text(
-                                text = "II",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    // Stop button
-                    FloatingActionButton(
-                        onClick = onStopRecording,
-                        containerColor = MaterialTheme.colorScheme.error
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .background(
-                                    color = MaterialTheme.colorScheme.onError,
-                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
-                                )
-                        )
-                    }
+                    )
                 }
             }
         }

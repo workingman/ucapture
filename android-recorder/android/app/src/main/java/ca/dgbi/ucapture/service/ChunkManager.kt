@@ -143,34 +143,6 @@ class ChunkManager @Inject constructor() {
         return completed
     }
 
-    /**
-     * End the current chunk for a pause operation.
-     *
-     * Unlike endSession(), this keeps the session alive so resume can continue
-     * with a new chunk in the same session.
-     */
-    fun endCurrentChunkForPause(): CompletedChunk? {
-        return completeCurrentChunk()
-        // Note: currentChunk stays set so we know the session context for resume
-    }
-
-    /**
-     * Start a new chunk after resuming from pause.
-     *
-     * Continues the same session with the next chunk number.
-     */
-    fun startNewChunkForResume(): ChunkInfo {
-        val current = currentChunk
-            ?: throw IllegalStateException("Cannot resume without an active session")
-
-        // Create next chunk in the same session
-        return createChunk(
-            sessionId = current.sessionId,
-            chunkNumber = current.chunkNumber + 1,
-            startTime = ZonedDateTime.now()
-        )
-    }
-
     private fun rotateChunk(): ChunkInfo? {
         val current = currentChunk ?: return null
 

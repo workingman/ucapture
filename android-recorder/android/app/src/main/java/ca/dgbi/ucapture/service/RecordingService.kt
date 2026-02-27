@@ -42,7 +42,6 @@ class RecordingService : Service() {
     enum class State {
         IDLE,
         RECORDING,
-        PAUSED,
         STOPPED
     }
 
@@ -52,8 +51,6 @@ class RecordingService : Service() {
         private const val WAKE_LOCK_TAG = "ucapture:recording"
 
         const val ACTION_START = "ca.dgbi.ucapture.action.START"
-        const val ACTION_PAUSE = "ca.dgbi.ucapture.action.PAUSE"
-        const val ACTION_RESUME = "ca.dgbi.ucapture.action.RESUME"
         const val ACTION_STOP = "ca.dgbi.ucapture.action.STOP"
 
         const val EXTRA_QUALITY = "quality"
@@ -132,8 +129,6 @@ class RecordingService : Service() {
                 )
                 startRecording(quality, chunkDuration)
             }
-            ACTION_PAUSE -> pauseRecording()
-            ACTION_RESUME -> resumeRecording()
             ACTION_STOP -> stopRecording()
         }
         return START_STICKY
@@ -145,7 +140,7 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (_state.value == State.RECORDING || _state.value == State.PAUSED) {
+        if (_state.value == State.RECORDING) {
             stopRecording()
         }
         releaseWakeLock()
@@ -211,90 +206,20 @@ class RecordingService : Service() {
     }
 
     /**
-     * Pause recording and immediately complete the current chunk.
-     *
-     * This ensures no audio is lost - the chunk is finalized and persisted
-     * the moment the user pauses. When resumed, a new chunk starts fresh.
-     */
-    fun pauseRecording() {
-        if (_state.value != State.RECORDING) {
-            return
-        }
-
-        try {
-            // Stop chunk timer first
-            chunkManager.stopChunkTimer()
-            stopDurationTimer()
-
-            // Complete the current chunk immediately (audio is saved to disk)
-            audioRecorder.stop()
-            chunkManager.endCurrentChunkForPause()
-
-            _state.value = State.PAUSED
-            updateNotification()
-        } catch (e: AudioRecorder.AudioRecorderException) {
-            // TODO: Notify UI of error
-        }
-    }
-
-    /**
-     * Resume recording by starting a new chunk.
-     *
-     * After pause, a fresh chunk begins so no time gaps exist within a chunk.
-     */
-    fun resumeRecording() {
-        if (_state.value != State.PAUSED) {
-            return
-        }
-
-        try {
-            // Start a new chunk for the resumed recording
-            val chunk = chunkManager.startNewChunkForResume()
-            _currentFile.value = chunk.file
-            _currentChunkNumber.value = chunk.chunkNumber
-
-            audioRecorder.start(chunk.file, currentQuality)
-            _state.value = State.RECORDING
-            startDurationTimer()
-
-            // Resume chunk timer
-            chunkManager.startChunkTimer(serviceScope) { newChunk ->
-                rotateToNewChunk(newChunk)
-            }
-            updateNotification()
-        } catch (e: AudioRecorder.AudioRecorderException) {
-            // TODO: Notify UI of error
-            _state.value = State.PAUSED
-        }
-    }
-
-    /**
      * Stop recording and finalize the current chunk.
-     *
-     * If recording is active, stops audio and creates a final chunk.
-     * If paused, the chunk was already saved on pause, so just clean up.
      */
     fun stopRecording(): File? {
-        val currentState = _state.value
-        if (currentState == State.IDLE || currentState == State.STOPPED) {
+        if (_state.value != State.RECORDING) {
             return null
         }
 
         stopDurationTimer()
         chunkManager.stopChunkTimer()
 
-        val file: File?
-        if (currentState == State.RECORDING) {
-            // Active recording: stop audio and finalize chunk
-            file = audioRecorder.stop()
+        val file = audioRecorder.stop()
 
-            // End session emits the final chunk - keep collector alive to persist it
-            chunkManager.endSession()
-        } else {
-            // Paused: chunk was already saved on pause, just clean up session
-            file = _currentFile.value
-            chunkManager.reset()
-        }
+        // End session emits the final chunk - keep collector alive to persist it
+        chunkManager.endSession()
 
         // Wait for the final chunk to be fully persisted before stopping service
         _state.value = State.STOPPED
@@ -383,26 +308,14 @@ class RecordingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val pauseResumeIntent = PendingIntent.getService(
-            this,
-            1,
-            Intent(this, RecordingService::class.java).apply {
-                action = if (_state.value == State.PAUSED) ACTION_RESUME else ACTION_PAUSE
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
         val duration = _durationSeconds.value
         val durationText = String.format("%02d:%02d", duration / 60, duration % 60)
         val chunkText = if (_currentChunkNumber.value > 1) " (chunk ${_currentChunkNumber.value})" else ""
 
         val statusText = when (_state.value) {
             State.RECORDING -> "Recording $durationText$chunkText"
-            State.PAUSED -> "Paused $durationText$chunkText"
             else -> "Ready"
         }
-
-        val pauseResumeText = if (_state.value == State.PAUSED) "Resume" else "Pause"
 
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("uCapture")
@@ -410,7 +323,6 @@ class RecordingService : Service() {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .setContentIntent(contentIntent)
-            .addAction(0, pauseResumeText, pauseResumeIntent)
             .addAction(0, "Stop", stopIntent)
             .build()
     }

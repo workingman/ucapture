@@ -11,6 +11,10 @@ import javax.inject.Singleton
  * Manages retention policy for local recordings.
  *
  * Handles cleanup of old recordings that have been uploaded to cloud storage.
+ *
+ * Safety model: files are only deleted after UPLOADED status + retention period elapsed.
+ * Future: require CONFIRMED status from a backend poll (verifying durable storage)
+ * before deleting local files. For dev/test, UPLOADED is treated as sufficient.
  */
 @Singleton
 class RetentionManager @Inject constructor(

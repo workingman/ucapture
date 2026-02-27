@@ -1,12 +1,10 @@
 package ca.dgbi.ucapture.data.model
 
-import ca.dgbi.ucapture.data.local.entity.CalendarEventEntity
 import ca.dgbi.ucapture.data.local.entity.LocationSampleEntity
 import ca.dgbi.ucapture.data.local.entity.RecordingEntity
 import com.google.gson.FieldNamingPolicy
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
-import com.google.gson.reflect.TypeToken
 import java.time.Instant
 
 /**
@@ -18,8 +16,7 @@ import java.time.Instant
 data class RecordingMetadata(
     val recording: RecordingInfo,
     val device: DeviceInfo,
-    val location: LocationInfo? = null,
-    val calendar: CalendarInfo? = null
+    val location: LocationInfo? = null
 ) {
     /**
      * Core recording parameters. Field names use camelCase here and are serialized
@@ -51,13 +48,6 @@ data class RecordingMetadata(
         val address: String? = null
     )
 
-    /** First calendar event that overlaps with the recording. */
-    data class CalendarInfo(
-        val eventId: String,
-        val eventTitle: String,
-        val attendees: List<String>
-    )
-
     /**
      * Serialize to JSON string, omitting optional sections that are null.
      *
@@ -75,29 +65,21 @@ data class RecordingMetadata(
         root.add("recording", gson.toJsonTree(recording))
         root.add("device", gson.toJsonTree(device))
         location?.let { root.add("location", gson.toJsonTree(it)) }
-        calendar?.let { root.add("calendar", gson.toJsonTree(it)) }
         return gson.toJson(root)
     }
 
     companion object {
-        // Reuse a single Gson instance for attendees list parsing (field names irrelevant for List<String>)
-        private val gson = GsonBuilder()
-            .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
-            .create()
-
         /**
          * Build [RecordingMetadata] from Room entities.
          *
          * @param recording       The recording entity
          * @param locationSamples GPS samples collected during this chunk — the most-accurate
          *                        sample (lowest accuracy radius) is included in the output
-         * @param calendarEvents  Events overlapping this chunk — the first is included
          * @param deviceInfo      Device model, OS version, and app version
          */
         fun fromEntities(
             recording: RecordingEntity,
             locationSamples: List<LocationSampleEntity>,
-            calendarEvents: List<CalendarEventEntity>,
             deviceInfo: DeviceInfo
         ): RecordingMetadata {
             val startedAt = Instant.ofEpochMilli(recording.startTimeEpochMilli).toString()
@@ -115,19 +97,6 @@ data class RecordingMetadata(
                     )
                 }
 
-            val calendarInfo = calendarEvents.firstOrNull()?.let { event ->
-                val attendees: List<String> = try {
-                    gson.fromJson(event.attendeesJson, object : TypeToken<List<String>>() {}.type)
-                } catch (e: Exception) {
-                    emptyList()
-                }
-                CalendarInfo(
-                    eventId = event.eventId.toString(),
-                    eventTitle = event.title,
-                    attendees = attendees
-                )
-            }
-
             return RecordingMetadata(
                 recording = RecordingInfo(
                     startedAt = startedAt,
@@ -136,8 +105,7 @@ data class RecordingMetadata(
                     fileSizeBytes = recording.fileSizeBytes
                 ),
                 device = deviceInfo,
-                location = locationInfo,
-                calendar = calendarInfo
+                location = locationInfo
             )
         }
     }

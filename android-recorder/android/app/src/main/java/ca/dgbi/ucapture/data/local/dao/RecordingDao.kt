@@ -34,6 +34,9 @@ interface RecordingDao {
     @Query("SELECT * FROM recordings WHERE upload_status = :status")
     suspend fun getByUploadStatus(status: String): List<RecordingEntity>
 
+    @Query("SELECT * FROM recordings WHERE upload_status = 'uploading' AND created_at < :cutoffEpochMilli")
+    suspend fun getStuckUploading(cutoffEpochMilli: Long): List<RecordingEntity>
+
     @Query("SELECT * FROM recordings WHERE end_time < :beforeEpochMilli AND upload_status = 'uploaded' ORDER BY end_time ASC")
     suspend fun getUploadedBefore(beforeEpochMilli: Long): List<RecordingEntity>
 

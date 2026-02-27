@@ -22,7 +22,9 @@ class UCaptureApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         uploadScheduler.setupPeriodicRetry()
+        uploadScheduler.setupPeriodicCleanup()
         uploadScheduler.schedulePendingUploads(applicationScope)
+        uploadScheduler.runStartupCleanup(applicationScope)
     }
 
     override val workManagerConfiguration: Configuration

@@ -57,7 +57,6 @@ class UploadWorker @AssistedInject constructor(
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .setRequiresBatteryNotLow(true)
                     .build()
             )
             .setBackoffCriteria(
@@ -87,8 +86,10 @@ class UploadWorker @AssistedInject constructor(
         Log.d("UploadWorker", "Starting upload for recording $recordingId (attempt ${runAttemptCount + 1}/$MAX_RETRIES)")
 
         // Check if authenticated
-        if (!cloudStorage.isAuthenticated()) {
-            Log.w("UploadWorker", "Not authenticated, will retry later")
+        val isAuth = cloudStorage.isAuthenticated()
+        Log.d("UploadWorker", "Authentication check: isAuthenticated=$isAuth, provider=${cloudStorage.providerId}")
+        if (!isAuth) {
+            Log.w("UploadWorker", "Not authenticated for ${cloudStorage.providerId}, will retry later")
             return Result.retry()
         }
 
@@ -164,7 +165,6 @@ class UploadWorker @AssistedInject constructor(
         val metadata = RecordingMetadata.fromEntities(
             recording = recordingWithMetadata.recording,
             locationSamples = recordingWithMetadata.locationSamples,
-            calendarEvents = recordingWithMetadata.calendarEvents,
             deviceInfo = deviceInfo
         )
 

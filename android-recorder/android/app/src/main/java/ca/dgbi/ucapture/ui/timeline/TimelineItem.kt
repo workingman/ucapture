@@ -66,18 +66,9 @@ fun TimelineItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 // Show metadata counts if present
-                val metadataInfo = buildString {
-                    if (recordingWithMetadata.locationSamples.isNotEmpty()) {
-                        append("${recordingWithMetadata.locationSamples.size} locations")
-                    }
-                    if (recordingWithMetadata.calendarEvents.isNotEmpty()) {
-                        if (isNotEmpty()) append(" • ")
-                        append("${recordingWithMetadata.calendarEvents.size} events")
-                    }
-                }
-                if (metadataInfo.isNotEmpty()) {
+                if (recordingWithMetadata.locationSamples.isNotEmpty()) {
                     Text(
-                        text = metadataInfo,
+                        text = "${recordingWithMetadata.locationSamples.size} locations",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

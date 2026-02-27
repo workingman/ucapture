@@ -5,32 +5,28 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import ca.dgbi.ucapture.data.local.dao.CalendarEventDao
 import ca.dgbi.ucapture.data.local.dao.LocationSampleDao
 import ca.dgbi.ucapture.data.local.dao.RecordingDao
-import ca.dgbi.ucapture.data.local.entity.CalendarEventEntity
 import ca.dgbi.ucapture.data.local.entity.LocationSampleEntity
 import ca.dgbi.ucapture.data.local.entity.RecordingEntity
 
 /**
  * Room database for uCapture app.
  *
- * Contains recordings and their associated metadata (location samples, calendar events).
+ * Contains recordings and their associated metadata (location samples).
  */
 @Database(
     entities = [
         RecordingEntity::class,
-        LocationSampleEntity::class,
-        CalendarEventEntity::class
+        LocationSampleEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun recordingDao(): RecordingDao
     abstract fun locationSampleDao(): LocationSampleDao
-    abstract fun calendarEventDao(): CalendarEventDao
 
     companion object {
         const val DATABASE_NAME = "ucapture.db"
@@ -39,6 +35,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE recordings ADD COLUMN batch_id TEXT")
+            }
+        }
+
+        /** Removes the calendar_events table (calendar metadata moved to backend). */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS calendar_events")
             }
         }
     }

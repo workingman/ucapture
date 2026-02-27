@@ -60,6 +60,10 @@ data class RecordingEntity(
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis()
 ) {
+    // TODO: Add CONFIRMED status once backend polling is implemented.
+    //  CONFIRMED = backend has verified durable storage of this recording.
+    //  RetentionManager should require CONFIRMED (not just UPLOADED) before
+    //  deleting local files. For dev/test, UPLOADED is treated as sufficient.
     object UploadStatus {
         const val PENDING = "pending"
         const val UPLOADING = "uploading"

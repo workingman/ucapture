@@ -179,8 +179,7 @@ class TimelineViewModelTest {
                 md5Hash = "hash123",
                 uploadStatus = uploadStatus
             ),
-            locationSamples = emptyList(),
-            calendarEvents = emptyList()
+            locationSamples = emptyList()
         )
     }
 }

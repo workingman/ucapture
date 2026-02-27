@@ -3,7 +3,6 @@ package ca.dgbi.ucapture.di
 import android.content.Context
 import androidx.room.Room
 import ca.dgbi.ucapture.data.local.AppDatabase
-import ca.dgbi.ucapture.data.local.dao.CalendarEventDao
 import ca.dgbi.ucapture.data.local.dao.LocationSampleDao
 import ca.dgbi.ucapture.data.local.dao.RecordingDao
 import dagger.Module
@@ -27,7 +26,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             AppDatabase.DATABASE_NAME
         )
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
     }
 
@@ -39,7 +38,4 @@ object DatabaseModule {
     fun provideLocationSampleDao(database: AppDatabase): LocationSampleDao =
         database.locationSampleDao()
 
-    @Provides
-    fun provideCalendarEventDao(database: AppDatabase): CalendarEventDao =
-        database.calendarEventDao()
 }

@@ -1,16 +1,12 @@
 package ca.dgbi.ucapture.data.repository
 
-import ca.dgbi.ucapture.data.local.dao.CalendarEventDao
 import ca.dgbi.ucapture.data.local.dao.LocationSampleDao
 import ca.dgbi.ucapture.data.local.dao.RecordingDao
-import ca.dgbi.ucapture.data.local.entity.CalendarEventEntity
 import ca.dgbi.ucapture.data.local.entity.LocationSampleEntity
 import ca.dgbi.ucapture.data.local.entity.RecordingEntity
 import ca.dgbi.ucapture.data.local.relation.RecordingWithMetadata
 import ca.dgbi.ucapture.service.ChunkManager
-import ca.dgbi.ucapture.service.metadata.CalendarEvent
 import ca.dgbi.ucapture.service.metadata.LocationSample
-import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import java.time.Duration
 import java.time.Instant
@@ -26,11 +22,8 @@ import javax.inject.Singleton
 @Singleton
 class RecordingRepository @Inject constructor(
     private val recordingDao: RecordingDao,
-    private val locationSampleDao: LocationSampleDao,
-    private val calendarEventDao: CalendarEventDao
+    private val locationSampleDao: LocationSampleDao
 ) {
-    private val gson = Gson()
-
     val allRecordings: Flow<List<RecordingEntity>> = recordingDao.getAllOrderedByTime()
 
     val allRecordingsWithMetadata: Flow<List<RecordingWithMetadata>> =
@@ -43,13 +36,11 @@ class RecordingRepository @Inject constructor(
      *
      * @param chunk The completed audio chunk
      * @param locationSamples Location samples collected during this chunk
-     * @param calendarEvents Calendar events that overlap with this chunk
      * @return The database ID of the saved recording
      */
     suspend fun saveCompletedChunk(
         chunk: ChunkManager.CompletedChunk,
-        locationSamples: List<LocationSample>,
-        calendarEvents: List<CalendarEvent>
+        locationSamples: List<LocationSample>
     ): Long {
         val recordingEntity = RecordingEntity(
             sessionId = chunk.sessionId,
@@ -67,11 +58,6 @@ class RecordingRepository @Inject constructor(
         if (locationSamples.isNotEmpty()) {
             val locationEntities = locationSamples.map { it.toEntity(recordingId) }
             locationSampleDao.insertAll(locationEntities)
-        }
-
-        if (calendarEvents.isNotEmpty()) {
-            val eventEntities = calendarEvents.map { it.toEntity(recordingId) }
-            calendarEventDao.insertAll(eventEntities)
         }
 
         return recordingId
@@ -100,6 +86,9 @@ class RecordingRepository @Inject constructor(
     suspend fun getFailedUploads(): List<RecordingEntity> =
         recordingDao.getByUploadStatus(RecordingEntity.UploadStatus.FAILED)
 
+    suspend fun getStuckUploading(cutoff: Instant): List<RecordingEntity> =
+        recordingDao.getStuckUploading(cutoff.toEpochMilli())
+
     suspend fun getUploadedBefore(beforeTime: Instant): List<RecordingEntity> =
         recordingDao.getUploadedBefore(beforeTime.toEpochMilli())
 
@@ -123,18 +112,5 @@ class RecordingRepository @Inject constructor(
         bearing = bearing,
         timestampEpochMilli = timestamp.toEpochMilli(),
         provider = provider
-    )
-
-    private fun CalendarEvent.toEntity(recordingId: Long) = CalendarEventEntity(
-        recordingId = recordingId,
-        eventId = eventId,
-        title = title,
-        description = description,
-        location = location,
-        startTimeEpochMilli = startTime.toEpochMilli(),
-        endTimeEpochMilli = endTime.toEpochMilli(),
-        attendeesJson = gson.toJson(attendees),
-        calendarName = calendarName,
-        isAllDay = isAllDay
     )
 }

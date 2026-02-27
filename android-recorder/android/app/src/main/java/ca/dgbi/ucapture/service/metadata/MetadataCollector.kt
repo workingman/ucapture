@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.Flow
  * Interface for metadata collectors that gather contextual information
  * during audio recording sessions.
  *
- * Implementations collect different types of metadata (location, calendar, etc.)
+ * Implementations collect different types of metadata (e.g. location)
  * and associate them with recording chunks.
  */
 interface MetadataCollector<T> {

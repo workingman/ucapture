@@ -14,7 +14,6 @@ import androidx.core.app.NotificationCompat
 import ca.dgbi.ucapture.MainActivity
 import ca.dgbi.ucapture.R
 import ca.dgbi.ucapture.data.repository.RecordingRepository
-import ca.dgbi.ucapture.service.metadata.CalendarMetadataCollector
 import ca.dgbi.ucapture.service.metadata.LocationMetadataCollector
 import ca.dgbi.ucapture.service.metadata.MetadataCollectorManager
 import ca.dgbi.ucapture.data.remote.UploadWorker
@@ -75,9 +74,6 @@ class RecordingService : Service() {
 
     @Inject
     lateinit var locationCollector: LocationMetadataCollector
-
-    @Inject
-    lateinit var calendarCollector: CalendarMetadataCollector
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var chunkCollectionJob: Job? = null
@@ -438,18 +434,16 @@ class RecordingService : Service() {
      * Persist a completed chunk with its metadata to the database.
      *
      * Called when a chunk completes (either via rotation or session end).
-     * Collects location and calendar metadata, saves to Room, and schedules upload.
+     * Collects location metadata, saves to Room, and schedules upload.
      */
     private suspend fun persistCompletedChunk(chunk: ChunkManager.CompletedChunk) {
         // Collect metadata for this chunk
         val locationSamples = locationCollector.getMetadataForChunk(chunk)
-        val calendarEvents = calendarCollector.getMetadataForChunk(chunk)
 
         // Persist to database
         val recordingId = recordingRepository.saveCompletedChunk(
             chunk = chunk,
-            locationSamples = locationSamples,
-            calendarEvents = calendarEvents
+            locationSamples = locationSamples
         )
 
         // Calculate and store MD5 hash for later verification

@@ -115,7 +115,7 @@ class UploadWorkerTest {
 
         val worker = createWorker()
         val recording = createRecordingEntity(filePath = tempFile.absolutePath)
-        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList(), emptyList())
+        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList())
 
         val metadataFile = File.createTempFile("metadata", ".json")
         metadataFile.deleteOnExit()
@@ -143,7 +143,7 @@ class UploadWorkerTest {
 
         val worker = createWorker()
         val recording = createRecordingEntity(filePath = tempFile.absolutePath)
-        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList(), emptyList())
+        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList())
         val batchId = "20260225-143000-a3f2"
 
         coEvery { cloudStorage.isAuthenticated() } returns true
@@ -171,7 +171,7 @@ class UploadWorkerTest {
 
         val worker = createWorker()
         val recording = createRecordingEntity(filePath = tempFile.absolutePath)
-        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList(), emptyList())
+        val recordingWithMetadata = RecordingWithMetadata(recording, emptyList())
 
         every { workerParams.runAttemptCount } returns 5 // Max retries reached
 
